@@ -1,6 +1,6 @@
 // Service worker: uygulama dosyalarını önbelleğe alır, internet yokken de açılır.
 // Güncelleme yayınlayınca VERSION'u artır.
-const VERSION = 'ioi-v2';
+const VERSION = 'ioi-v3';
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './store.js', './util.js', './plan.js', './config.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png'
