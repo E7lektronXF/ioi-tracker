@@ -1,6 +1,6 @@
 // Otomatik üretildi: TUBITAK_Bilgisayar_1_Asama_Plani.md
 export const PLAN = {
- "start": "2026-10-05",
+ "start": "2026-10-12",
  "exam": "2027-05-08",
  "topics": {
   "C1": "Temel program",
@@ -49,7 +49,7 @@ export const PLAN = {
  "weeks": [
   {
    "n": 0,
-   "range": "5–11 Eki",
+   "range": "12–18 Eki",
    "title": "Kurulum + ilk adımlar",
    "goal": "Çalışma ortamı, soru arşivi ve takip sistemi hazır; C ve mantığa ilk adım atıldı.",
    "done": "gcc ile bir program derlenip çalıştı; arşiv 4 klasöre ayrıldı; hata defteri açıldı; ilk 3 C programı yazıldı.",
@@ -120,7 +120,7 @@ export const PLAN = {
   },
   {
    "n": 1,
-   "range": "12–18 Eki",
+   "range": "19–25 Eki",
    "title": "C aritmetiği · İşleçler · Önerme mantığı",
    "goal": "C'de aritmetik ve işleçler; önerme mantığının dili.",
    "done": "10 C ifadesinin çıktısını kağıtta %80 doğru bulmak; 3 değişkenli doğruluk tablosu kurmak.",
@@ -197,7 +197,7 @@ export const PLAN = {
   },
   {
    "n": 2,
-   "range": "19–25 Eki",
+   "range": "26 Eki–1 Kas",
    "title": "Koşul yapıları · Kümeler ve bağıntılar",
    "goal": "C'de dallanma; bağıntı özellikleri ve bileşke bağıntı.",
    "done": "S∘R'yi 4 elemanlı kümede 5 dk'da hesaplamak; switch fall-through çıktılarını doğru bulmak.",
@@ -253,7 +253,7 @@ export const PLAN = {
     {
      "h": 2.0,
      "line": "C+A",
-     "task": "C2+C3 karma 20 “çıktı ne?” (1 sa) · A7 — doğrucu/yalancı (knights & knaves) 4 bulmaca (1 sa)",
+     "task": "C2+C3 karma 20 “çıktı ne?” (1 sa) · A7 — doğrucu/yalancı (knights & knaves) 3 bulmaca + 1 tablo/zebra bulmacası (1 sa)",
      "label": "C2+C3 karma 20 “çıktı ne?”",
      "codes": [
       "C2",
@@ -274,10 +274,10 @@ export const PLAN = {
   },
   {
    "n": 3,
-   "range": "26 Eki–1 Kas",
+   "range": "2–8 Kas",
    "title": "Döngüler · Fonksiyonlar (matematik)",
-   "goal": "Döngülerin kaç kez döndüğünü bulmak; fonksiyon türleri.",
-   "done": "İç içe iki basit döngünün iterasyon sayısını bulmak; birebir/örten ayrımı.",
+   "goal": "Döngülerin kaç kez döndüğünü bulmak; fonksiyon türleri ve sayısı.",
+   "done": "i *= 2 / j = i tipi döngülerin iterasyon sayısını bulmak; birebir/örten ayrımı; mⁿ ve m!/(m−n)! formüllerini kullanmak.",
    "days": [
     {
      "h": 1.5,
@@ -302,22 +302,22 @@ export const PLAN = {
     {
      "h": 1.5,
      "line": "C",
-     "task": "C4 — break, continue, goto; iç içe döngüde sayma",
+     "task": "C4 — break, continue, goto; iç içe döngüde sayma: i *= 2 / i <<= 1 (≈ log), j = i'den başlayan iç döngüler; 10 soru",
      "label": "Döngüler",
      "codes": [
       "C4"
      ],
-     "src": "KING 6.4"
+     "src": "KING 6.4 · Maden"
     },
     {
      "h": 1.0,
      "line": "M",
-     "task": "M2 alıştırma: fonksiyon soruları 12 adet",
+     "task": "M2 — fonksiyon sayma: tüm fonksiyonlar mⁿ, birebir m!/(m−n)!, bağıntı sayısı 2^(n²)",
      "label": "Kümeler · bağıntılar · fonksiyonlar",
      "codes": [
       "M2"
      ],
-     "src": "MEB 10 · Maden"
+     "src": "SM"
     },
     {
      "h": 0,
@@ -330,7 +330,7 @@ export const PLAN = {
     {
      "h": 2.0,
      "line": "C",
-     "task": "C5 — akış diyagramları (flow charts): 3 diyagramı koda çevir (45 dk) · C4: 15 döngü-sayma sorusu (75 dk)",
+     "task": "C5 — akış diyagramları (flow charts): 2 diyagramı koda çevir (30 dk) · C4 pekiştirme: asal kontrolü + basamak toplamı programları (45 dk) · 10 döngü-sayma sorusu (45 dk)",
      "label": "Akış diyagramları (flow charts)",
      "codes": [
       "C5",
@@ -350,84 +350,8 @@ export const PLAN = {
   },
   {
    "n": 4,
-   "range": "2–8 Kas",
-   "title": "Döngü pekiştirme · Fonksiyon sayma · Permütasyon girişi",
-   "goal": "Zor döngü sayma; sayma kurallarına giriş.",
-   "done": "i *= 2 / j = i tipi döngülerin sayısını bulmak; m^n ve m!/(m−n)! formüllerini kullanmak.",
-   "days": [
-    {
-     "h": 1.5,
-     "line": "C",
-     "task": "C4 pekiştirme: asal kontrolü, basamak toplamı, faktöriyel, döngüyle Fibonacci (bilgisayarda yaz)",
-     "label": "Döngüler",
-     "codes": [
-      "C4"
-     ],
-     "src": "CS50 W1 problem set"
-    },
-    {
-     "h": 1.5,
-     "line": "M",
-     "task": "M2 — fonksiyon sayma: tüm fonksiyonlar mⁿ, birebir m!/(m−n)!, bağıntı sayısı 2^(n²)",
-     "label": "Kümeler · bağıntılar · fonksiyonlar",
-     "codes": [
-      "M2"
-     ],
-     "src": "SM"
-    },
-    {
-     "h": 1.5,
-     "line": "C",
-     "task": "C4 — zor döngü sayma: i *= 2 / i <<= 1 (≈ log), j = i'den başlayan iç döngüler; 15 soru",
-     "label": "Döngüler",
-     "codes": [
-      "C4"
-     ],
-     "src": "Maden"
-    },
-    {
-     "h": 1.0,
-     "line": "M",
-     "task": "M3 — toplama/çarpma kuralı, faktöriyel, permütasyon P(n,r)",
-     "label": "Permütasyon",
-     "codes": [
-      "M3"
-     ],
-     "src": "KSS / SM · MEB 10"
-    },
-    {
-     "h": 0,
-     "line": "",
-     "task": "",
-     "label": "",
-     "codes": [],
-     "src": ""
-    },
-    {
-     "h": 2.0,
-     "line": "M+A",
-     "task": "M3: 15 temel sayma sorusu (1 sa) · A7 — tablo/zebra bulmacaları: 2 adet (1 sa)",
-     "label": "M3: 15 temel sayma sorusu",
-     "codes": [
-      "M3",
-      "A7"
-     ],
-     "src": "Maden"
-    },
-    {
-     "h": 1.0,
-     "line": "D",
-     "task": "Haftalık madencilik seti: 8 soru / 25 dk (sadece öğrenilmiş konular) → 30 dk analiz + hata defteri → 5 dk sonraki haftanın planı",
-     "label": "Haftalık madencilik seti: 8 soru / 25 dk",
-     "codes": [],
-     "src": "Maden (2007–2015)"
-    }
-   ]
-  },
-  {
-   "n": 5,
    "range": "9–15 Kas",
-   "title": "Permütasyon türleri · Char ve tipler",
+   "title": "Permütasyon · Char ve tipler",
    "goal": "Permütasyonun tüm türleri; char aritmetiği ve taşma.",
    "done": "Tekrarlı harfli bir kelimenin diziliş sayısını bulmak; unsigned char 255+1 gibi taşmaları açıklamak.",
    "days": [
@@ -444,12 +368,12 @@ export const PLAN = {
     {
      "h": 1.5,
      "line": "M",
-     "task": "M3 — tekrarlı permütasyon n!/(a!·b!…), dairesel permütasyon (n−1)!",
+     "task": "M3 — toplama/çarpma kuralı, permütasyon P(n,r), tekrarlı permütasyon n!/(a!·b!…)",
      "label": "Permütasyon",
      "codes": [
       "M3"
      ],
-     "src": "KSS"
+     "src": "KSS / SM · MEB 10"
     },
     {
      "h": 1.5,
@@ -464,7 +388,7 @@ export const PLAN = {
     {
      "h": 1.0,
      "line": "M",
-     "task": "M3 — sözlük sırası (lexicographic rank); “yan yana olsun” (blok yöntemi)",
+     "task": "M3 — dairesel permütasyon (n−1)!, sözlük sırası (lexicographic rank), “yan yana olsun” (blok yöntemi)",
      "label": "Permütasyon",
      "codes": [
       "M3"
@@ -482,8 +406,8 @@ export const PLAN = {
     {
      "h": 2.0,
      "line": "M",
-     "task": "M3 yoğun: 25 soru — kelime, dairesel masa, blok yöntemi",
-     "label": "M3 yoğun: 25 soru",
+     "task": "M3 yoğun: 20 soru — temel sayma, kelime, dairesel masa, blok yöntemi",
+     "label": "M3 yoğun: 20 soru",
      "codes": [
       "M3"
      ],
@@ -500,7 +424,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 6,
+   "n": 5,
    "range": "16–22 Kas",
    "title": "ARA TATİL — Kombinasyon · Diziler",
    "goal": "Tatil saatini kombinasyon ve dizilere yatırmak.",
@@ -582,7 +506,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 7,
+   "n": 6,
    "range": "23–29 Kas",
    "title": "C fonksiyonları · İleri sayma · İçerme-dışlama",
    "goal": "Fonksiyon çağrısının bellek mantığı; kısıtlı sayma.",
@@ -657,7 +581,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 8,
+   "n": 7,
    "range": "30 Kas–6 Ara",
    "title": "Özyineleme · Düzensiz permütasyon · Sıralama",
    "goal": "Çağrı ağacı çizmek; Dₙ formülü; sıralama algoritmalarını adım adım yürütmek.",
@@ -733,7 +657,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 9,
+   "n": 8,
    "range": "7–13 Ara",
    "title": "FAZ 1 KAPANIŞ · Borç haftası · Sayı teorisi girişi",
    "goal": "Faz 1'i ölçmek, açıkları kapatmak.",
@@ -808,7 +732,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 10,
+   "n": 9,
    "range": "14–20 Ara",
    "title": "İşaretçiler 1 · Binom",
    "goal": "Bellek adresi mantığı; binom katsayıları.",
@@ -883,7 +807,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 11,
+   "n": 10,
    "range": "21–27 Ara",
    "title": "İşaretçiler 2 · Olasılık 1 · DP sezgisi",
    "goal": "Pointer aritmetiği; olasılığın temeli.",
@@ -959,7 +883,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 12,
+   "n": 11,
    "range": "28 Ara–3 Oca",
    "title": "Dizgiler · Bayes",
    "goal": "String = '\\0' ile biten char dizisi; Bayes teoremi.",
@@ -1036,7 +960,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 13,
+   "n": 12,
    "range": "4–10 Oca",
    "title": "2D dizi + ileri özyineleme · Sayı teorisi",
    "goal": "Memoization'ın çağrı sayısını nasıl değiştirdiğini görmek.",
@@ -1114,7 +1038,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 14,
+   "n": 13,
    "range": "11–17 Oca",
    "title": "Çizge girişi · Taban dönüşümü",
    "goal": "Çizge dili ve iki temsil yöntemi.",
@@ -1191,7 +1115,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 15,
+   "n": 14,
    "range": "18–24 Oca",
    "title": "Özel sayılar · Açgözlü · FAZ 2 KAPANIŞ",
    "goal": "Stirling/Catalan kalıplarını tanımak; Faz 2'yi ölçmek.",
@@ -1268,7 +1192,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 16,
+   "n": 15,
    "range": "25–31 Oca",
    "title": "YARIYIL — BFS · DFS · Oyun teorisi · struct",
    "goal": "Çizge gezme algoritmalarını elle hatasız yürütmek.",
@@ -1344,7 +1268,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 17,
+   "n": 16,
    "range": "1–7 Şub",
    "title": "YARIYIL — Topolojik sıralama · SCC · Padding · DENEME 1",
    "goal": "Çizge müfredatını bitirmek; ilk tam deneme.",
@@ -1418,7 +1342,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 18,
+   "n": 17,
    "range": "8–14 Şub",
    "title": "Bit işlemleri · Logaritma",
    "goal": "Bitwise kalıplarını görür görmez tanımak.",
@@ -1493,7 +1417,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 19,
+   "n": 18,
    "range": "15–21 Şub",
    "title": "Dinamik bellek · Dosya · Önişlemci · Polinom",
    "goal": "C müfredatını bitirmek.",
@@ -1571,7 +1495,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 20,
+   "n": 19,
    "range": "22–28 Şub",
    "title": "Matrisler · Karma tekrar · DENEME 2",
    "goal": "Son büyük matematik konusu; ikinci ölçüm.",
@@ -1641,7 +1565,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 21,
+   "n": 20,
    "range": "1–7 Mar",
    "title": "Zayıf konu haftası #1 · Temel geometri",
    "goal": "Denemelerin gösterdiği açıkları kapatmak.",
@@ -1710,7 +1634,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 22,
+   "n": 21,
    "range": "8–14 Mar",
    "title": "ARA TATİL (Ramazan Bayramı) — Büyük tekrar · DENEME 3",
    "goal": "Tüm müfredatı bir kez baştan sona geçmek; KN3 kararı.",
@@ -1781,7 +1705,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 23,
+   "n": 22,
    "range": "15–21 Mar",
    "title": "Zayıf konu haftası #2 · Faz 5 hazırlığı",
    "goal": "Yeni konu dönemini kapatmak.",
@@ -1846,7 +1770,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 24,
+   "n": 23,
    "range": "22–28 Mar",
    "title": "SINAV MODU — D4 (2022)",
    "goal": "Deneme → analiz → hedefli onarım döngüsü.",
@@ -1911,7 +1835,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 25,
+   "n": 24,
    "range": "29 Mar–4 Nis",
    "title": "SINAV MODU — D5 (2018)",
    "goal": "Deneme → analiz → hedefli onarım döngüsü.",
@@ -1976,7 +1900,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 26,
+   "n": 25,
    "range": "5–11 Nis",
    "title": "SINAV MODU — D6 (2023)",
    "goal": "Deneme → analiz → hedefli onarım döngüsü.",
@@ -2041,7 +1965,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 27,
+   "n": 26,
    "range": "12–18 Nis",
    "title": "SINAV MODU — D7 (2024)",
    "goal": "Deneme → analiz → hedefli onarım döngüsü.",
@@ -2106,7 +2030,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 28,
+   "n": 27,
    "range": "19–25 Nis",
    "title": "SINAV MODU — D8 (2025)",
    "goal": "Deneme → analiz → hedefli onarım döngüsü.",
@@ -2171,7 +2095,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 29,
+   "n": 28,
    "range": "26 Nis–2 May",
    "title": "SINAV MODU — D9 (2026)",
    "goal": "Deneme → analiz → hedefli onarım döngüsü.",
@@ -2236,7 +2160,7 @@ export const PLAN = {
    ]
   },
   {
-   "n": 30,
+   "n": 29,
    "range": "3–8 May",
    "title": "SINAV HAFTASI (8 Mayıs senaryosu)",
    "goal": "Yeni bir şey öğrenme; hafızayı tazele, dinlen.",
