@@ -158,7 +158,7 @@ export const PLAN = {
     {
      "h": 1.0,
      "line": "M",
-     "task": "M1 alıştırma: 13 soru",
+     "task": "M1 alıştırma: 8 soru",
      "label": "Mantık (logic)",
      "codes": [
       "M1"
@@ -312,7 +312,7 @@ export const PLAN = {
     {
      "h": 1.0,
      "line": "M",
-     "task": "M2 alıştırma: fonksiyon soruları 20 adet",
+     "task": "M2 alıştırma: fonksiyon soruları 12 adet",
      "label": "Kümeler · bağıntılar · fonksiyonlar",
      "codes": [
       "M2"
@@ -1485,7 +1485,7 @@ export const PLAN = {
     {
      "h": 1.0,
      "line": "D",
-     "task": "Madencilik seti — D1'in en zayıf kategorisinden 7 soru + analiz",
+     "task": "Madencilik seti — D1'in en zayıf kategorisinden 5 soru + analiz",
      "label": "Madencilik seti",
      "codes": [],
      "src": "Maden"
