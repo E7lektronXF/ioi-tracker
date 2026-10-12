@@ -57,7 +57,7 @@ Supabase (veritabanı + giriş)  ←→  GitHub Pages (site)  ←→  Windows ·
 |---|---|
 | `index.html`, `styles.css`, `app.js` | Arayüz |
 | `store.js` | Supabase senkronu + çevrimdışı kuyruk |
-| `plan.js` | 31 haftalık planın günlük hali (plan dosyasından otomatik üretildi) |
+| `plan.js` | 30 haftalık planın günlük hali (plan dosyasından otomatik üretildi) |
 | `config.js` | Supabase bağlantı bilgileri |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Ana ekrana eklenebilen uygulama (PWA) |
 | `schema.sql` | Veritabanı tabloları ve güvenlik kuralları |

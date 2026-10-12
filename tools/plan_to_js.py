@@ -70,7 +70,7 @@ for w in weeks:
     out_weeks.append({'n': w['n'], 'range': w['range'], 'title': w['title'], 'goal': w['goal'], 'done': w['done'], 'days': days})
 
 exams = [['D1','2027-02-06',15,'2019'],['D2','2027-02-27',18,'2020'],['D3','2027-03-13',22,'2021'],['D4','2027-03-27',25,'2022'],['D5','2027-04-03',27,'2018'],['D6','2027-04-10',30,'2023'],['D7','2027-04-17',32,'2024'],['D8','2027-04-24',34,'2025'],['D9','2027-05-01',35,'2026'],['SINAV','2027-05-08',38,'']]
-data = {'start': '2026-10-05', 'exam': '2027-05-08', 'topics': topics, 'weeks': out_weeks,
+data = {'start': '2026-10-12', 'exam': '2027-05-08', 'topics': topics, 'weeks': out_weeks,
         'exams': [{'code': e[0], 'date': e[1], 'target': e[2], 'year': e[3]} for e in exams]}
 js = '// Otomatik üretildi: TUBITAK_Bilgisayar_1_Asama_Plani.md\nexport const PLAN = ' + json.dumps(data, ensure_ascii=False, indent=1) + ';\n'
 open(OUT, 'w', encoding='utf-8').write(js)

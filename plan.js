@@ -49,46 +49,18 @@ export const PLAN = {
  "weeks": [
   {
    "n": 0,
-   "range": "12–18 Eki",
+   "range": "16–18 Eki",
    "title": "Kurulum + ilk adımlar",
    "goal": "Çalışma ortamı, soru arşivi ve takip sistemi hazır; C ve mantığa ilk adım atıldı.",
    "done": "gcc ile bir program derlenip çalıştı; arşiv 4 klasöre ayrıldı; hata defteri açıldı; ilk 3 C programı yazıldı.",
    "days": [
     {
-     "h": 1.5,
-     "line": "S",
-     "task": "C derleyicisini kur: Ek F'deki adımları sırayla uygula (MSYS2 + gcc). Sonunda merhaba.c derlenip çalışmalı. Takılırsan yedek: OnlineGDB",
-     "label": "C derleyicisini kur",
+     "h": 0,
+     "line": "",
+     "task": "",
+     "label": "",
      "codes": [],
-     "src": "Ek F · OnlineGDB"
-    },
-    {
-     "h": 1.0,
-     "line": "S",
-     "task": "TÜBİTAK arşivinden 2007–2026 Lise Bilgisayar 1. aşama soruları + çözümleri indir. Klasörle: 01_Maden (2007–2015), 02_Deneme (2018–2024), 03_Rezerv (2025, 2026), 04_Yedek (2016, 2017). Hata defteri + haftalık kayıt şablonunu hazırla (Ek D)",
-     "label": "TÜBİTAK arşivinden 2007–2026 Lise Bilgisayar 1…",
-     "codes": [],
-     "src": "TÜBİTAK arşiv · Ek D"
-    },
-    {
-     "h": 1.5,
-     "line": "C",
-     "task": "C1 başlangıç — CS50 Week 1 dersinin ilk yarısı: program yapısı, printf, değişken",
-     "label": "Temel program",
-     "codes": [
-      "C1"
-     ],
-     "src": "CS50 W1 · KING 2"
-    },
-    {
-     "h": 1.5,
-     "line": "M",
-     "task": "M1 başlangıç — önerme, bağlaçlar (∧ ∨ ¬ → ↔), doğruluk tablosu; 15 soru",
-     "label": "Mantık (logic)",
-     "codes": [
-      "M1"
-     ],
-     "src": "MEB 9 · SM"
+     "src": ""
     },
     {
      "h": 0,
@@ -99,22 +71,48 @@ export const PLAN = {
      "src": ""
     },
     {
-     "h": 2.0,
-     "line": "A",
-     "task": "Soru turu: 2015 sınavını çözmeden oku; her soruyu M / A / G / C / Z olarak etiketle; en kolay görünen 5 soruyu dene (1,5 sa) · Planın takvimini ajandaya işle (0,5 sa)",
-     "label": "Soru turu",
+     "h": 0,
+     "line": "",
+     "task": "",
+     "label": "",
      "codes": [],
-     "src": "GS 2015"
+     "src": ""
     },
     {
-     "h": 1.0,
-     "line": "C",
-     "task": "C1 — 3 küçük program yaz (değişken, aritmetik, printf); her birinin çıktısını önce kağıda yaz",
-     "label": "Temel program",
+     "h": 0,
+     "line": "",
+     "task": "",
+     "label": "",
+     "codes": [],
+     "src": ""
+    },
+    {
+     "h": 1.5,
+     "line": "S",
+     "task": "C derleyicisini kur: Ek F'deki adımları sırayla uygula (MSYS2 + gcc). Sonunda merhaba.c derlenip çalışmalı. Takılırsan yedek: OnlineGDB",
+     "label": "C derleyicisini kur",
+     "codes": [],
+     "src": "Ek F · OnlineGDB"
+    },
+    {
+     "h": 2.5,
+     "line": "S+C",
+     "task": "Arşiv + defter: TÜBİTAK arşivinden 2007–2026 Lise Bilgisayar 1. aşama soruları + çözümleri indir; 01_Maden (2007–2015), 02_Deneme (2018–2024), 03_Rezerv (2025, 2026), 04_Yedek (2016, 2017) olarak klasörle; hata defteri + haftalık kayıt şablonunu hazırla (Ek D) (1 sa) · C1 başlangıç — CS50 Week 1 dersinin ilk yarısı (program yapısı, printf, değişken) + 3 küçük program yaz; her birinin çıktısını önce kağıda yaz (1,5 sa)",
+     "label": "Arşiv + defter",
      "codes": [
       "C1"
      ],
-     "src": "CS50 W1"
+     "src": "TÜBİTAK arşiv · Ek D · CS50 W1 · KING 2"
+    },
+    {
+     "h": 2.5,
+     "line": "M+S",
+     "task": "M1 başlangıç — önerme, bağlaçlar (∧ ∨ ¬ → ↔), doğruluk tablosu; 15 soru (1,5 sa) · Soru turu: 2015 sınavını çözmeden oku, her soruyu M / A / G / C / Z olarak etiketle (0,5 sa) · Planın takvimini ajandaya işle (0,5 sa)",
+     "label": "Mantık (logic)",
+     "codes": [
+      "M1"
+     ],
+     "src": "MEB 9 · SM · GS 2015"
     }
    ]
   },
