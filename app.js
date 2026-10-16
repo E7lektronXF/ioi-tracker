@@ -39,6 +39,7 @@ const state = {
   armed: null,
   loginError: '',
   busy: false,
+  sel: null, // ana ekranda elle seçilen görev (yoksa sıradaki açık görev)
   fakeToday: params.get('today')
 };
 
@@ -62,6 +63,22 @@ const lineColor = (l) => (LINES[(l || '')[0]] || LINES.T).c;
 const lineShort = (l) => String(l || '').split('+').map((x) => (LINES[x] ? LINES[x].s : x)).join(' + ');
 const dateLabel = (s) => { const d = parse(s); return `${d.getDate()} ${MON3[d.getMonth()]}`; };
 const isCode = (t) => !!PLAN.topics[t];
+const topicName = (c) => PLAN.topics[c] || '';
+
+// Görev kuyruğu: planın saat verilmiş her günü bir görev. Bitenler topic_status
+// tablosunda 'task:<hafta>.<gün>' koduyla 'done' olarak tutulur (şema değişmeden senkron olur).
+const TASKS = [];
+PLAN.weeks.forEach((wk, w) => wk.days.forEach((d, i) => {
+  if (d.h > 0) TASKS.push({ id: `task:${w}.${i}`, week: w, idx: i, date: addDays(PLAN.start, w * 7 + i), ...d });
+}));
+const TASK_BY_ID = Object.fromEntries(TASKS.map((x) => [x.id, x]));
+const taskOnDate = (s) => TASKS.find((x) => x.date === s) || null;
+const isDone = (topics, id) => topics[id] === 'done';
+const firstOpen = (topics) => TASKS.find((x) => !isDone(topics, x.id)) || null;
+function shownTask(topics) {
+  if (state.sel && TASK_BY_ID[state.sel]) return TASK_BY_ID[state.sel];
+  return firstOpen(topics);
+}
 
 function nextPlanned(t) {
   for (let i = 1; i < 14; i++) {
@@ -118,6 +135,9 @@ const I = {
   x: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   arrow: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
   chev: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A1A1A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
+  left: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
+  right: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+  check: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   today: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/></svg>',
   stats: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 20v-6M12 20V5M19 20v-10"/></svg>',
   logo: `<svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true" style="transform:rotate(-90deg)"><circle cx="14" cy="14" r="10.5" fill="none" stroke="#26262A" stroke-width="4"/><circle cx="14" cy="14" r="10.5" fill="none" stroke="${ACC}" stroke-width="4" stroke-linecap="round" stroke-dasharray="44 66"/></svg>`
@@ -179,35 +199,48 @@ function codeChip(code) {
   const c = lineColor(code);
   return `<span class="code" style="color:${c};background:${rgba(c, 0.14)}">${esc(code)}</span>`;
 }
+function topicTag(code) {
+  return `<span class="ttag">${codeChip(code)}<span>${esc(topicName(code))}</span></span>`;
+}
+const lineLong = (l) => String(l || '').split('+').map((x) => (LINES[x] ? LINES[x].n : x)).join(' + ');
 
 function viewToday(d) {
   const t = today();
   const k = diffDays(t, PLAN.start);
-  const dt = parse(t);
   const w = curWeek(t);
-  const pd = planDay(t);
-  const inPlan = k >= 0 && k < NW * 7;
-  const eyebrow = `${DAYS_LONG[dow(t)]} · ${dt.getDate()} ${MONTHS[dt.getMonth()]}${inPlan ? ` · Hafta ${w}` : ''}`;
+  const task = shownTask(d.topics);
+  const open = firstOpen(d.topics);
+  const todayTask = taskOnDate(t);
 
-  let title, meta = '', detail = '';
-  if (k < 0) {
-    const s = parse(PLAN.start);
-    const first = PLAN.weeks[0].days[0];
-    title = `Plan ${s.getDate()} ${MONTHS[s.getMonth()]}'de başlıyor`;
-    meta = `<span>${k === -1 ? 'Yarın' : `${-k} gün sonra`} ilk oturum: ${esc(first.label)} · ${fmtH(first.h)} sa</span>`;
-  } else if (!pd) {
+  let eyebrow, title, meta = '', detail = '', kind = 'none';
+  if (!task) {
+    eyebrow = `${DAYS_LONG[dow(t)]} · ${parse(t).getDate()} ${MONTHS[parse(t).getMonth()]}`;
     title = 'Plan tamamlandı';
-    meta = '<span>Sınav sonrası: C++ ve USACO hattı</span>';
-  } else if (pd.h === 0) {
-    title = 'Dinlenme günü';
-    const nx = nextPlanned(t);
-    if (nx) meta = `<span>Sonraki: ${DAYS_LONG[dow(nx.s)]} — ${esc(nx.p.label)} · ${fmtH(nx.p.h)} sa</span>`;
+    meta = '<span>Tüm görevler bitti. Sınav sonrası: C++ ve USACO hattı</span>';
   } else {
-    title = pd.label;
-    const chips = pd.codes.length ? pd.codes.slice(0, 3).map(codeChip).join('') : codeChip(pd.line || '—');
-    meta = `${chips}<span>${esc(lineShort(pd.line))} · ${fmtH(pd.h)} saat${pd.src ? ' · ' + esc(pd.src) : ''}</span>`;
-    detail = `<details class="task"><summary>Görevin ayrıntısı</summary><p>${esc(pd.task)}</p></details>`;
+    const td = parse(task.date);
+    const done = isDone(d.topics, task.id);
+    const when = `${DAYS_LONG[dow(task.date)]} ${td.getDate()} ${MONTHS[td.getMonth()]}`;
+    kind = done ? 'done' : task.date < t ? 'late' : task.date === t ? 'today' : 'ahead';
+    const lbl = { done: '✓ Tamamlandı', late: 'Gecikmiş görev', today: 'Bugünün görevi', ahead: 'İleriden çalışıyorsun' }[kind];
+    eyebrow = `<span class="kind" data-k="${kind}">${lbl}</span> · ${when} · Hafta ${task.week}`;
+    title = task.label;
+    const tags = task.codes.length ? `<div class="tags">${task.codes.map(topicTag).join('')}</div>` : '';
+    meta = `${tags}<div class="meta-row"><span>${esc(lineLong(task.line))} · ${fmtH(task.h)} saat${task.src ? ' · Kaynak: ' + esc(task.src) : ''}</span></div>`;
+    detail = `<p class="task-text">${esc(task.task)}</p>`;
   }
+  const restNote = task && !todayTask && k >= 0 && task.date > t && !state.sel
+    ? `<div class="note-line">Bugün planda görev yok (dinlenme günü). İstersen sıradaki göreve şimdiden başlayabilirsin.</div>` : '';
+
+  const idx = task ? TASKS.indexOf(task) : -1;
+  const nav = task ? `<div class="tnav">
+      <button type="button" class="icon-btn" data-action="task-prev" aria-label="Önceki görev" ${idx <= 0 ? 'disabled' : ''}>${I.left}</button>
+      ${kind === 'done'
+        ? `<button type="button" class="btn btn-sm" data-action="task-undo">Geri al (bitmedi)</button>`
+        : `<button type="button" class="btn btn-sm" data-action="task-done">${I.check}Bitti olarak işaretle</button>`}
+      <button type="button" class="icon-btn" data-action="task-next" aria-label="Sonraki görev" ${idx >= TASKS.length - 1 ? 'disabled' : ''}>${I.right}</button>
+    </div>
+    ${state.sel && open && state.sel !== open.id ? `<button type="button" class="link-btn" data-action="task-home">Sıradaki açık göreve dön</button>` : ''}` : '';
 
   const act = k < 0 ? 0 : weekActH(w, d.byDay);
   const plan = weekPlanH(w);
@@ -225,18 +258,28 @@ function viewToday(d) {
   const lastSet = sp.length ? `%${sp[sp.length - 1].v}` : '—';
   const toExam = diffDays(PLAN.exam, t);
 
-  const strip = weekDates(w).map((s, i) => {
-    const p = PLAN.weeks[w].days[i];
+  const sw = task ? task.week : w;
+  const strip = weekDates(sw).map((s, i) => {
+    const p = PLAN.weeks[sw].days[i];
     const a = d.byDay[s] || 0;
+    const tk = p.h > 0 ? `task:${sw}.${i}` : null;
+    const dn = tk && isDone(d.topics, tk);
     let cls, val;
-    if (s === t) { cls = 'today-c'; val = a ? fmtH(a / 60) : (p.h ? fmtH(p.h) : '—'); }
+    if (dn) { cls = 'done'; val = a ? fmtH(a / 60) : fmtH(p.h); }
+    else if (s === t) { cls = 'today-c'; val = a ? fmtH(a / 60) : (p.h ? fmtH(p.h) : '—'); }
     else if (s < t) {
       if (a) { cls = 'done'; val = fmtH(a / 60); }
       else if (p.h && k >= 0) { cls = 'miss'; val = fmtH(p.h); }
       else { cls = 'rest'; val = p.h ? fmtH(p.h) : '—'; }
     } else { cls = p.h ? 'next' : 'rest next'; val = p.h ? fmtH(p.h) : '—'; }
-    const ln = p.line ? p.line : 'boş';
-    return `<div class="${cls}" title="${esc(dateLabel(s))}${p.label ? ' · ' + esc(p.label) : ''}"><span class="dl">${DAYS[i]}</span><span class="dv">${val}</span><span class="dc" style="color:${p.line ? lineColor(p.line) : '#8A8A92'}">${esc(ln)}</span></div>`;
+    if (s === t && cls !== 'today-c') cls += ' is-today';
+    if (task && tk === task.id) cls += ' sel';
+    const ln = p.h > 0 ? (p.codes[0] || (LINES[(p.line || 'T')[0]] || LINES.T).s) : 'boş';
+    const inner = `<span class="dl">${DAYS[i]}${dn ? ' <b class="ok">✓</b>' : ''}</span><span class="dv">${val}</span><span class="dc" style="color:${p.line ? lineColor(p.line) : '#8A8A92'}">${esc(ln)}</span>`;
+    const tip = `${esc(dateLabel(s))}${p.label ? ' · ' + esc(p.label) : ' · görev yok'}${dn ? ' · bitti' : ''}`;
+    return tk
+      ? `<button type="button" class="${cls}" data-action="pick-task" data-id="${tk}" title="${tip}" aria-label="${DAYS_LONG[i]}: ${esc(p.label)}${dn ? ', bitti' : ''}">${inner}</button>`
+      : `<div class="${cls}" title="${tip}">${inner}</div>`;
   }).join('');
 
   return `<div class="today">
@@ -245,6 +288,8 @@ function viewToday(d) {
       <h1 class="h1">${esc(title.replace(/ · /g, ', '))}</h1>
       <div class="meta">${meta}</div>
       ${detail}
+      ${nav}
+      ${restNote}
     </div>
     <div class="ring" role="img" aria-label="Bu hafta ${fmtH(act)} / ${fmtH(plan)} saat">
       <svg width="248" height="248" viewBox="0 0 248 248" aria-hidden="true">
@@ -259,7 +304,7 @@ function viewToday(d) {
       <div><b>${toExam >= 0 ? toExam + ' gün' : '—'}</b><span>sınava</span></div>
       <div><b>${lastSet}</b><span>son set</span></div>
     </div>
-    <section class="strip" aria-label="Bu hafta">${strip}</section>
+    <section class="strip-wrap" aria-label="Hafta ${sw} görevleri"><div class="strip-h">Hafta ${sw}${task && PLAN.weeks[sw].title ? ' · ' + esc(PLAN.weeks[sw].title) : ''}</div><div class="strip">${strip}</div></section>
     <a class="link-more" href="#/istatistik">Tüm istatistikler ${I.arrow}</a>
   </div>`;
 }
@@ -428,9 +473,9 @@ function topicCard(d) {
       const s = d.topics[code] || 'todo';
       const style = s === 'done' ? `background:${rgba(c, 0.16)};border-color:${rgba(c, 0.5)};color:${c}` : s === 'doing' ? `border:1px dashed ${c};color:${c}` : '';
       const lbl = { todo: 'başlamadı', doing: 'devam', done: 'bitti' }[s];
-      return `<button type="button" class="tchip" style="${style}" data-action="topic" data-code="${code}" title="${esc(PLAN.topics[code])} · ${lbl}" aria-label="${code} ${esc(PLAN.topics[code])}: ${lbl}. Değiştirmek için dokun">${code}</button>`;
+      return `<button type="button" class="tchip" style="${style}" data-action="topic" data-code="${code}" title="${esc(PLAN.topics[code])} · ${lbl}" aria-label="${code} ${esc(PLAN.topics[code])}: ${lbl}. Değiştirmek için dokun"><b>${code}</b><span>${esc(PLAN.topics[code])}</span></button>`;
     }).join('');
-    return `<div class="tg"><div class="tg-h">${name}<span class="c">${done} / ${codes.length}</span><div class="bar"><i style="width:${(done / codes.length) * 100}%;background:${c}"></i></div></div><div class="chips">${chips}</div></div>`;
+    return `<div class="tg"><div class="tg-h">${name}<span class="c">${done} / ${codes.length}</span><div class="bar"><i style="width:${(done / codes.length) * 100}%;background:${c}"></i></div></div><div class="chips tchips">${chips}</div></div>`;
   }).join('');
   return figHead('Konu haritası', 'Dokununca durum değişir: başlamadı → devam → bitti',
     `<div class="legend"><span><i class="sw" style="background:rgba(237,237,239,.18);border:1px solid rgba(237,237,239,.5)"></i>Bitti</span><span><i class="sw" style="border:1px dashed #EDEDEF"></i>Devam</span><span><i class="sw" style="border:1px solid #2E2E33"></i>Başlamadı</span></div>`) +
@@ -514,10 +559,9 @@ function defaultTopic(line, pd) {
   return opts[0] ? opts[0].v : '';
 }
 
-function newForm(minutes, fromTimer) {
+function newForm(minutes, fromTimer, taskId) {
   const t = today();
-  const pd = planDay(t);
-  const p = pd && pd.h > 0 ? pd : null;
+  const p = (taskId && TASK_BY_ID[taskId]) || null;
   let line = p && p.line ? p.line[0] : 'C';
   if (!LINES[line]) line = 'C';
   const em = p ? /^(D\d)\b/.exec(p.label) : null;
@@ -526,7 +570,8 @@ function newForm(minutes, fromTimer) {
     day: t, line, topic: defaultTopic(line, p),
     minutes: minutes || (p ? Math.round(p.h * 60) : 60),
     correct: '', wrong: '', total: '', exam: em ? em[1] : (nextExam ? nextExam.code : 'D1'),
-    err: {}, note: '', markDone: false, errOpen: false, error: '', fromTimer: !!fromTimer
+    err: {}, note: '', markDone: false, errOpen: false, error: '', fromTimer: !!fromTimer,
+    taskId: p ? p.id : null, taskDone: !!p && !isDone(state.store.snapshot().topics, p.id)
   };
 }
 
@@ -540,6 +585,10 @@ function sheetLog() {
   return `<form class="sheet" data-form novalidate>
     <div class="grab"></div>
     <div class="sheet-head"><h2 id="sheet-title">${f.fromTimer ? 'Oturumu kaydet' : 'Kayıt ekle'}</h2><button type="button" class="icon-btn" data-action="close-sheet" aria-label="Kapat">${I.x}</button></div>
+
+    ${f.taskId ? (() => { const tk = TASK_BY_ID[f.taskId]; return isDone(state.store.snapshot().topics, tk.id)
+      ? `<div class="check task-check">✓ Görev zaten bitti: <b>${esc(tk.label)}</b></div>`
+      : `<label class="check task-check"><input type="checkbox" name="taskDone" ${f.taskDone ? 'checked' : ''}><span>Görevi tamamladım: <b>${esc(tk.label)}</b> <span class="muted">(${DAYS[dow(tk.date)]} ${dateLabel(tk.date)})</span><br><span class="muted">İşaretliyse ana ekran sıradaki göreve geçer</span></span></label>`; })() : ''}
 
     <fieldset><legend>Hat</legend><div class="chips" style="gap:8px">
       ${LINE_KEYS.map((l) => { const on = l === f.line; const c = LINES[l].c; return `<button type="button" class="hat" data-action="pick-line" data-v="${l}" aria-pressed="${on}" style="${on ? `background:${rgba(c, 0.14)};border-color:${c};color:#EDEDEF` : ''}"><b style="color:${c}">${l}</b>${LINES[l].s}</button>`; }).join('')}
@@ -646,11 +695,13 @@ function saveForm() {
     err, note: f.note.trim() || null, created_at: new Date().toISOString()
   };
   state.store.add(row);
+  let advanced = false;
+  if (f.taskId && f.taskDone && !isDone(state.store.snapshot().topics, f.taskId)) { state.store.setTopic(f.taskId, 'done'); advanced = true; if (state.sel === f.taskId) state.sel = null; }
   if (f.markDone && isCode(f.topic)) state.store.setTopic(f.topic, 'done');
   else if (isCode(f.topic) && !state.store.snapshot().topics[f.topic]) state.store.setTopic(f.topic, 'doing');
   if (f.fromTimer) { state.timer = null; LS.set('ioi.timer', null); }
   closeSheet();
-  toast('Kaydedildi');
+  toast(advanced ? 'Kaydedildi · sıradaki göreve geçildi' : 'Kaydedildi');
   render();
 }
 
@@ -673,19 +724,40 @@ document.addEventListener('click', (e) => {
   const a = b.dataset.action;
   const f = state.form;
   switch (a) {
-    case 'timer-start':
-      state.timer = { start: Date.now() }; LS.set('ioi.timer', state.timer); render(); break;
+    case 'timer-start': {
+      const tk = shownTask(state.store.snapshot().topics);
+      state.timer = { start: Date.now(), task: tk ? tk.id : null }; LS.set('ioi.timer', state.timer); render(); break;
+    }
     case 'timer-cancel':
       state.timer = null; LS.set('ioi.timer', null); render(); break;
     case 'timer-stop': {
       const min = Math.max(15, Math.round((Date.now() - state.timer.start) / 60000 / 5) * 5);
-      state.form = newForm(min, true); openSheet('log'); break;
+      state.form = newForm(min, true, state.timer.task); openSheet('log'); break;
     }
-    case 'open-log': state.form = newForm(); openSheet('log'); break;
+    case 'open-log': { const tk = shownTask(state.store.snapshot().topics); state.form = newForm(null, false, tk ? tk.id : null); if (tk) state.form.taskDone = false; openSheet('log'); break; }
+    case 'task-done': {
+      const tk = shownTask(state.store.snapshot().topics);
+      if (tk) { state.store.setTopic(tk.id, 'done'); state.sel = null; toast('Görev bitti · sıradakine geçildi'); }
+      render(); window.scrollTo(0, 0); break;
+    }
+    case 'task-undo': {
+      const tk = shownTask(state.store.snapshot().topics);
+      if (tk) { state.store.setTopic(tk.id, 'todo'); state.sel = null; toast('Görev tekrar açıldı'); }
+      render(); break;
+    }
+    case 'task-prev': case 'task-next': {
+      const tk = shownTask(state.store.snapshot().topics);
+      const i = tk ? TASKS.indexOf(tk) : -1;
+      const nx = TASKS[i + (a === 'task-next' ? 1 : -1)];
+      if (nx) state.sel = nx.id;
+      render(); break;
+    }
+    case 'task-home': state.sel = null; render(); break;
+    case 'pick-task': state.sel = b.dataset.id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); break;
     case 'close-sheet': closeSheet(); break;
     case 'account': openSheet('account'); break;
     case 'pick-line':
-      f.line = b.dataset.v; f.topic = defaultTopic(f.line, planDay(f.day)); f.markDone = false; f.error = ''; renderSheet(); break;
+      f.line = b.dataset.v; f.topic = defaultTopic(f.line, f.taskId ? TASK_BY_ID[f.taskId] : null); f.markDone = false; f.error = ''; renderSheet(); break;
     case 'min': f.minutes = clamp(f.minutes + +b.dataset.v, 15, 600); renderSheet(); break;
     case 'min-set': f.minutes = +b.dataset.v; renderSheet(); break;
     case 'err': { const k = b.dataset.k; f.err[k] = clamp((f.err[k] || 0) + +b.dataset.v, 0, 99); renderSheet(); break; }
@@ -755,6 +827,22 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 window.addEventListener('online', wake);
 setInterval(() => { if (document.visibilityState === 'visible') wake(); }, 60000);
 
+// İlk sürümde görevlerin bitti bilgisi yoktu: kayıt girilmiş geçmiş plan günlerini bir kez "bitti" say.
+let migrating = false;
+function migrateTasks() {
+  const st = state.store;
+  if (migrating || !st || (st.mode === 'supabase' && (!st.user || !st.lastSync))) return;
+  const snap = st.snapshot();
+  const topics = snap.topics || {};
+  if (Object.keys(topics).some((c) => c.startsWith('task:'))) return;
+  const days = new Set((snap.sessions || []).map((r) => r.day));
+  const t = today();
+  const hits = TASKS.filter((x) => x.date <= t && days.has(x.date));
+  if (!hits.length) return;
+  migrating = true;
+  try { hits.forEach((x) => st.setTopic(x.id, 'done')); } finally { migrating = false; }
+}
+
 // ---------------------------------------------------------------- başlat
 (async function start() {
   $app.innerHTML = '<div class="splash">Yükleniyor…</div>';
@@ -769,8 +857,9 @@ setInterval(() => { if (document.visibilityState === 'visible') wake(); }, 60000
     return;
   }
   if (state.store.mode === 'demo' && !state.fakeToday) state.fakeToday = demoToday;
-  state.store.onChange(() => { render(); if (state.sheet === 'account') renderSheet(); });
+  state.store.onChange(() => { migrateTasks(); render(); if (state.sheet === 'account') renderSheet(); });
+  migrateTasks();
   render();
-  state.store.refresh();
+  state.store.refresh().then(() => { migrateTasks(); render(); });
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
