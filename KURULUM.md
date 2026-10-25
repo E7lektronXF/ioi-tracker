@@ -52,6 +52,12 @@ Supabase (veritabanı + giriş)  ←→  GitHub Pages (site)  ←→  Windows ·
 - **Güncelleme yüklerken** `sw.js` içindeki `VERSION = 'ioi-v1'` satırını `ioi-v2` yap; cihazlar yeni sürümü alır.
 - `config.js` boşken site **demo modunda** açılır (örnek veri). Adresin sonuna `?demo` ekleyerek demo moduna her zaman bakabilirsin.
 
+## Nasıl çalışır (v7)
+- Uygulama süre ölçmez. Tek giriş: plan görevini **Bitti** işaretlemek (topic_status tablosunda `task:<hafta>.<gün>` satırı, `updated_at` = bitirme anı).
+- **Park et:** görev silinmeden plan sırasından geçici olarak çıkar. Park kaydı mevcut `sessions` tablosunda tutulur (`topic = 'park:task:<hafta>.<gün>'`, `day` = park tarihi, `exam_code` = dönüş tarihi ya da boş, `note` = sebep). Şema değişikliği gerekmez.
+- Önceki günlerden bitmeyenler **Devreden**, dönüş tarihi gelen park kayıtları **Parktan döndü** etiketiyle Bugün listesine gelir.
+- Bir **konu** (C1, M5…), o konuya ayrılmış görevlerin hepsi bitince "bitti" sayılır.
+
 ## Dosyalar
 | Dosya | Ne işe yarar |
 |---|---|

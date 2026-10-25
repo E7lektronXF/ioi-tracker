@@ -1,5 +1,8 @@
 -- IOI Tracker — Supabase veritabanı şeması
 -- Supabase panelinde: SQL Editor → New query → bu dosyanın tamamını yapıştır → Run
+--
+-- Uygulama v7 notu: görev 'bitti' durumu topic_status'ta ('task:<hafta>.<gün>'),
+-- park kayıtları sessions'ta (topic = 'park:task:...', exam_code = dönüş tarihi, note = sebep) tutulur.
 
 create table if not exists public.sessions (
   id          uuid primary key default gen_random_uuid(),

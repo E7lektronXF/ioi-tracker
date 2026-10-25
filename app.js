@@ -1,150 +1,174 @@
 import { PLAN } from './plan.js';
 import { createStore } from './store.js';
-import { LS, iso, parse, addDays, diffDays, dow, clamp, uuid, esc, fmtH, fmtMin, rgba } from './util.js';
+import { iso, parse, addDays, diffDays, dow, clamp, uuid, esc, fmtH, rgba } from './util.js';
+
+// Uygulama süre ölçmez. Tek giriş: plan görevini "bitti" işaretlemek. Bir görev geçici olarak
+// park edilebilir (sıradan çıkar, silinmez).
 
 const ACC = '#D4FF3A';
+const SAND = '#E3C9A0';
 const LINES = {
-  C: { n: 'C programlama', s: 'C programlama', c: '#7AA7FF' },
-  M: { n: 'Matematik', s: 'Matematik', c: '#FFB547' },
-  G: { n: 'Çizge teorisi', s: 'Çizge', c: '#C59BFF' },
-  A: { n: 'Algoritma / zeka', s: 'Algoritma', c: '#5EE0C8' },
-  T: { n: 'Tekrar / borç', s: 'Tekrar', c: '#8A8F98' },
-  D: { n: 'Deneme / set', s: 'Deneme', c: '#FF8A7A' },
-  K: { n: 'Kod Atölyesi', s: 'Kod Atölyesi', c: '#F0D264' },
-  S: { n: 'Kurulum', s: 'Kurulum', c: '#5A5F68' }
+  C: { n: 'C programlama', c: '#7AA7FF' },
+  M: { n: 'Matematik', c: '#FFB547' },
+  G: { n: 'Çizge teorisi', c: '#C59BFF' },
+  A: { n: 'Algoritma', c: '#5EE0C8' },
+  T: { n: 'Tekrar', c: '#8A8F98' },
+  D: { n: 'Deneme / set', c: '#FF8A7A' },
+  K: { n: 'Kod Atölyesi', c: '#F0D264' },
+  S: { n: 'Kurulum', c: '#8A8F98' }
 };
-const LINE_KEYS = Object.keys(LINES);
-const ERR = [['K', 'Konu eksiği'], ['İ', 'İşlem hatası'], ['O', 'Yanlış okuma'], ['Z', 'Zaman yetmedi'], ['T', 'Tuzak'], ['S', 'Strateji']];
 const DAYS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
 const DAYS_LONG = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
-const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 const MON3 = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
 const NW = PLAN.weeks.length;
-const PLAN_TOTAL = PLAN.weeks.reduce((a, w) => a + w.days.reduce((b, d) => b + d.h, 0), 0);
+const PARK = 'park:';
+
+// Plan görevleri: saat verilmiş her gün bir görev
+const TASKS = [];
+PLAN.weeks.forEach((wk, w) => wk.days.forEach((d, i) => {
+  if (d.h > 0) TASKS.push({ id: `task:${w}.${i}`, week: w, idx: i, date: addDays(PLAN.start, w * 7 + i), ...d });
+}));
+const TASK_BY_ID = Object.fromEntries(TASKS.map((x) => [x.id, x]));
 const TOPIC_CODES = Object.keys(PLAN.topics).sort((a, b) => a[0].localeCompare(b[0]) || +a.slice(1) - +b.slice(1));
-const PRESETS = {
-  T: ['Hata defteri', 'Borç kapatma', 'Zayıf konu', 'Kapanış testi', 'Karar noktası (KN)'],
-  D: ['Madencilik seti', 'Tam deneme', 'Deneme analizi', 'Hız seti'],
-  K: ['Kod Atölyesi #1', 'Kod Atölyesi #2', 'Kod Atölyesi #3', 'Kod Atölyesi #4', 'Kod Atölyesi #5', 'Kod Atölyesi #6', 'Kod Atölyesi #7', 'Ek problem'],
-  S: ['Kurulum']
-};
+// Bir konu, sadece o konuya ayrılmış görevlerin hepsi bitince "bitti" sayılır
+// (o konunun tek başına geçtiği görev yoksa: konunun geçtiği tüm görevler)
+const TOPIC_ITEMS = {};
+for (const c of TOPIC_CODES) {
+  const pure = TASKS.filter((x) => x.codes.length === 1 && x.codes[0] === c);
+  TOPIC_ITEMS[c] = pure.length ? pure : TASKS.filter((x) => x.codes.includes(c));
+}
 
 const params = new URLSearchParams(location.search);
 const state = {
   store: null,
-  range: LS.get('ioi.range', '8'),
-  timer: LS.get('ioi.timer', null),
-  form: null,
-  sheet: null, // 'log' | 'account'
-  armed: null,
+  parkFor: null,
+  form: { reason: '', when: 'haftasonu', date: '' },
+  keep: {}, // bu oturumda bitirilen görevler listede kalsın: id -> etiket
+  sheet: null, // 'park' | 'account'
   loginError: '',
   busy: false,
-  sel: null, // ana ekranda elle seçilen görev (yoksa sıradaki açık görev)
   fakeToday: params.get('today')
 };
 
 const $app = document.getElementById('app');
 const $sheet = document.getElementById('sheet');
 
-// ---------------------------------------------------------------- tarih / plan
+// ---------------------------------------------------------------- yardımcılar
 const today = () => state.fakeToday || iso(new Date());
-function planDay(s) {
-  const k = diffDays(s, PLAN.start);
-  if (k < 0) return null;
-  const w = Math.floor(k / 7);
-  if (w >= NW) return null;
-  return { week: w, ...PLAN.weeks[w].days[k % 7] };
-}
 const curWeek = (t) => clamp(Math.floor(diffDays(t, PLAN.start) / 7), 0, NW - 1);
-const weekDates = (w) => [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(PLAN.start, w * 7 + i));
-const weekPlanH = (w) => PLAN.weeks[w].days.reduce((a, d) => a + d.h, 0);
-const weekActH = (w, byDay) => weekDates(w).reduce((a, s) => a + (byDay[s] || 0), 0) / 60;
-const lineColor = (l) => (LINES[(l || '')[0]] || LINES.T).c;
-const lineShort = (l) => String(l || '').split('+').map((x) => (LINES[x] ? LINES[x].s : x)).join(' + ');
-const dateLabel = (s) => { const d = parse(s); return `${d.getDate()} ${MON3[d.getMonth()]}`; };
-const isCode = (t) => !!PLAN.topics[t];
-const topicName = (c) => PLAN.topics[c] || '';
+const lineColor = (l) => (LINES[String(l || '')[0]] || LINES.T).c;
+const lineLong = (l) => String(l || '').split('+').map((x) => (LINES[x] ? LINES[x].n : x)).join(' + ');
+const dShort = (s) => { const d = parse(s); return `${d.getDate()} ${MON3[d.getMonth()]}`; };
+const dLong = (s) => `${DAYS_LONG[dow(s)]} ${dShort(s)}`;
+const dMid = (s) => `${DAYS[dow(s)]} ${dShort(s)}`;
+const badgeOf = (x) => x.codes[0] || x.line || '—';
+const localDay = (ts) => (ts ? iso(new Date(ts)) : null);
+const isPark = (r) => typeof r.topic === 'string' && r.topic.startsWith(PARK);
 
-// Görev kuyruğu: planın saat verilmiş her günü bir görev. Bitenler topic_status
-// tablosunda 'task:<hafta>.<gün>' koduyla 'done' olarak tutulur (şema değişmeden senkron olur).
-const TASKS = [];
-PLAN.weeks.forEach((wk, w) => wk.days.forEach((d, i) => {
-  if (d.h > 0) TASKS.push({ id: `task:${w}.${i}`, week: w, idx: i, date: addDays(PLAN.start, w * 7 + i), ...d });
-}));
-const TASK_BY_ID = Object.fromEntries(TASKS.map((x) => [x.id, x]));
-const taskOnDate = (s) => TASKS.find((x) => x.date === s) || null;
-const isDone = (topics, id) => topics[id] === 'done';
-const firstOpen = (topics) => TASKS.find((x) => !isDone(topics, x.id)) || null;
-function shownTask(topics) {
-  if (state.sel && TASK_BY_ID[state.sel]) return TASK_BY_ID[state.sel];
-  return firstOpen(topics);
-}
-
-function nextPlanned(t) {
-  for (let i = 1; i < 14; i++) {
-    const s = addDays(t, i);
-    const p = planDay(s);
-    if (p && p.h > 0) return { s, p };
-  }
-  return null;
+function chip(code) {
+  const c = lineColor(code);
+  return `<span class="code" style="color:${c};background:${rgba(c, 0.14)}">${esc(code)}</span>`;
 }
 
 // ---------------------------------------------------------------- türetilmiş veri
 function derive() {
+  const t = today();
   const snap = state.store.snapshot();
-  const sessions = snap.sessions || [];
-  const byDay = {};
-  for (const r of sessions) byDay[r.day] = (byDay[r.day] || 0) + (r.minutes || 0);
-  return { sessions, topics: snap.topics || {}, byDay };
-}
-
-function streak(t, byDay) {
-  let n = 0;
-  let s = byDay[t] > 0 ? t : addDays(t, -1);
-  for (let i = 0; i < 400; i++) {
-    if (byDay[s] > 0) n++;
-    else {
-      if (diffDays(s, PLAN.start) < 0) break;
-      const p = planDay(s);
-      if (p && p.h > 0) break;
-    }
-    s = addDays(s, -1);
+  const all = snap.sessions || [];
+  const topics = snap.topics || {};
+  const at = snap.topicsAt || {};
+  const parks = {};
+  for (const r of all) {
+    if (!isPark(r)) continue;
+    const id = r.topic.slice(PARK.length);
+    if (TASK_BY_ID[id]) parks[id] = { row: r, id, parkedOn: r.day, backOn: r.exam_code || null, reason: r.note || '' };
   }
-  return n;
+  const done = (id) => topics[id] === 'done';
+  const doneDay = (id) => (done(id) ? localDay(at[id]) : null);
+  const parkedNow = (id) => !!parks[id] && !done(id) && (!parks[id].backOn || parks[id].backOn > t);
+  const returned = (id) => !!parks[id] && !done(id) && !!parks[id].backOn && parks[id].backOn <= t;
+  return { t, sessions: all.filter((r) => !isPark(r)), topics, parks, done, doneDay, parkedNow, returned };
 }
 
-function setPoints(sessions) {
-  const by = {};
-  for (const r of sessions) {
-    if (r.line !== 'D' || r.exam_code || !(r.total > 0) || r.correct == null) continue;
-    const w = Math.floor(diffDays(r.day, PLAN.start) / 7);
-    if (!by[w]) by[w] = { c: 0, t: 0 };
-    by[w].c += r.correct; by[w].t += r.total;
+function todayList(D) {
+  const t = D.t, dev = [], ret = [], cur = [];
+  for (const x of TASKS) {
+    if (D.parkedNow(x.id)) continue;
+    const dn = D.done(x.id);
+    const keep = state.keep[x.id];
+    if (D.returned(x.id) || keep === 'ret') { ret.push({ x, tag: 'ret' }); continue; }
+    if (x.date < t) { if (!dn || keep || D.doneDay(x.id) === t) dev.push({ x, tag: 'dev' }); }
+    else if (x.date === t) cur.push({ x, tag: '' });
+    else if (keep === 'ahead' || (dn && D.doneDay(x.id) === t)) cur.push({ x, tag: 'ahead' });
   }
-  return Object.keys(by).map(Number).sort((a, b) => a - b).map((w) => ({ w, label: 'H' + w, v: Math.round((by[w].c / by[w].t) * 100) }));
+  return dev.concat(ret, cur);
 }
 
-const net = (r) => (r.correct || 0) - (r.wrong || 0) / 4;
+function nextOpen(D, list) {
+  const e = list.find((e) => !D.done(e.x.id));
+  if (e) return e;
+  const x = TASKS.find((x) => x.date > D.t && !D.done(x.id) && !D.parkedNow(x.id));
+  return x ? { x, tag: 'future' } : null;
+}
+
+function planStatus(D) {
+  const t = D.t;
+  const first = TASKS.find((x) => !D.done(x.id) && !D.parkedNow(x.id));
+  if (!first) return { kind: 'done', big: 'Bitti', unit: '', sub: 'Plandaki bütün görevler bitti' };
+  const k = diffDays(first.date, t);
+  if (k < 0) return { kind: 'behind', big: `${-k} gün`, unit: 'geride', sub: `${dLong(first.date)} görevi (${badgeOf(first)}) hâlâ açık` };
+  if (diffDays(t, PLAN.start) < 0) return { kind: 'even', big: 'Başlamadı', unit: '', sub: `Plan ${dLong(PLAN.start)} başlıyor` };
+  if (k >= 2) return { kind: 'ahead', big: `${k - 1} gün`, unit: 'ileride', sub: `Sıradaki görev ${dLong(first.date)} günün` };
+  return { kind: 'even', big: 'Planla', unit: 'aynı hizada', sub: k === 0 ? 'Bugünün görevi sırada' : 'Bugüne kadar her şey bitti' };
+}
+
+const topicDone = (D, c) => D.topics[c] === 'done' || TOPIC_ITEMS[c].every((x) => D.done(x.id));
+const topicParked = (D, c) => TOPIC_ITEMS[c].some((x) => D.parkedNow(x.id));
+
+function lastStudy(D) {
+  let last = null;
+  const doneTasks = TASKS.filter((x) => D.done(x.id) && D.doneDay(x.id));
+  for (const x of doneTasks) { const d = D.doneDay(x.id); if (!last || d > last) last = d; }
+  if (!last) return null;
+  const n = diffDays(D.t, last);
+  return { day: last, ago: n <= 0 ? 'bugün' : n === 1 ? 'dün' : `${n} gün önce`, items: doneTasks.filter((x) => D.doneDay(x.id) === last) };
+}
+
+function activeParks(D) {
+  return Object.values(D.parks).filter((p) => D.parkedNow(p.id))
+    .map((p) => ({ ...p, x: TASK_BY_ID[p.id], days: Math.max(0, diffDays(D.t, p.parkedOn)) }))
+    .sort((a, b) => b.days - a.days);
+}
+
+function lastSet(D) {
+  const sets = D.sessions.filter((r) => r.line === 'D' && r.total > 0 && r.correct != null)
+    .sort((a, b) => (a.day + (a.created_at || '')).localeCompare(b.day + (b.created_at || '')));
+  if (!sets.length) return null;
+  const r = sets[sets.length - 1];
+  const net = (r.correct || 0) - (r.wrong || 0) / 4;
+  return { big: fmtH(net), sub: `${r.exam_code || r.topic || 'Set'} · ${dShort(r.day)} · ${r.correct} D${r.wrong ? `, ${r.wrong} Y` : ''} / ${r.total}` };
+}
 
 // ---------------------------------------------------------------- ikonlar
 const I = {
-  play: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><polygon points="7 4 20 12 7 20 7 4"/></svg>',
-  stop: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>',
-  plus: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
-  minus: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>',
   x: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   arrow: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
-  chev: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A1A1A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
-  left: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
-  right: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
-  check: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  park: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M9.5 16.5v-9h3.25a2.75 2.75 0 0 1 0 5.5H9.5"/></svg>',
+  clock: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
   today: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/></svg>',
   stats: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 20v-6M12 20V5M19 20v-10"/></svg>',
   logo: `<svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true" style="transform:rotate(-90deg)"><circle cx="14" cy="14" r="10.5" fill="none" stroke="#26262A" stroke-width="4"/><circle cx="14" cy="14" r="10.5" fill="none" stroke="${ACC}" stroke-width="4" stroke-linecap="round" stroke-dasharray="44 66"/></svg>`
 };
+I.parkNav = I.park.replace('width="20" height="20"', 'width="24" height="24"');
 
 // ---------------------------------------------------------------- iskelet
-function route() { return location.hash.startsWith('#/istatistik') ? 'stats' : 'today'; }
+function route() {
+  const h = location.hash;
+  if (h.startsWith('#/park')) return 'park';
+  if (h.startsWith('#/istatistik')) return 'stats';
+  return 'today';
+}
 
 function syncInfo() {
   const st = state.store;
@@ -155,377 +179,267 @@ function syncInfo() {
   return { s: 'ok', t: st.pending ? `${st.pending} bekliyor` : 'Senkron' };
 }
 
-function header(r) {
+function navLinks(r, nPark, cls) {
+  const badge = nPark ? `<span class="nbadge" aria-label="${nPark} konu parkta">${nPark}</span>` : '';
+  return `<a href="#/" class="${cls}" ${r === 'today' ? 'aria-current="page"' : ''}>${cls === 'tab' ? I.today : ''}<span>Bugün</span></a>
+    <a href="#/park" class="${cls}" ${r === 'park' ? 'aria-current="page"' : ''}>${cls === 'tab' ? I.parkNav : ''}<span>Park alanı</span>${badge}</a>
+    <a href="#/istatistik" class="${cls}" ${r === 'stats' ? 'aria-current="page"' : ''}>${cls === 'tab' ? I.stats : ''}<span>İstatistik</span></a>`;
+}
+
+function header(r, nPark, t) {
   const si = syncInfo();
   return `<header class="top">
     <a class="brand" href="#/">${I.logo}<b>IOI Tracker</b><span class="pill">1. Aşama · 2027</span></a>
-    <div class="top-right">
-      <nav class="nav" aria-label="Ana menü">
-        <a href="#/" ${r === 'today' ? 'aria-current="page"' : ''}>Bugün</a>
-        <a href="#/istatistik" ${r === 'stats' ? 'aria-current="page"' : ''}>İstatistik</a>
-      </nav>
-      <button type="button" class="sync" data-s="${si.s}" data-action="account" aria-label="Hesap ve senkron: ${esc(si.t)}"><span class="dot"></span><span class="txt">${esc(si.t)}</span></button>
-    </div>
+    <nav class="nav" aria-label="Ana menü">${navLinks(r, nPark, 'nl')}</nav>
+    <div class="rail-foot"><b>${Math.max(0, diffDays(PLAN.exam, t))} gün</b><span>sınava</span></div>
+    <button type="button" class="sync" data-s="${si.s}" data-action="account" aria-label="Hesap ve senkron: ${esc(si.t)}"><span class="dot"></span><span class="txt">${esc(si.t)}</span></button>
   </header>`;
-}
-
-function tabbar(r) {
-  return `<nav class="tabbar" aria-label="Sekmeler">
-    <a href="#/" ${r === 'today' ? 'aria-current="page"' : ''}>${I.today}Bugün</a>
-    <a href="#/istatistik" ${r === 'stats' ? 'aria-current="page"' : ''}>${I.stats}İstatistik</a>
-  </nav>`;
 }
 
 function render() {
   if (!state.store) return;
   if (state.store.mode === 'supabase' && !state.store.user) { $app.innerHTML = viewLogin(); return; }
   const r = route();
-  const d = derive();
-  const banner = state.store.mode === 'demo' ? `<div class="banner">Demo modu · örnek veri, sadece bu cihazda. Supabase bilgileri girilince gerçek verilerin görünür.</div>` : '';
-  $app.innerHTML = banner + header(r) + `<main>${r === 'stats' ? viewStats(d) : viewToday(d)}</main>` + tabbar(r);
-  document.title = r === 'stats' ? 'İstatistik · IOI Tracker' : 'IOI Tracker';
+  const D = derive();
+  const nPark = activeParks(D).length;
+  const banner = state.store.mode === 'demo' ? `<div class="banner">Demo modu · örnek veri, sadece bu cihazda.</div>` : '';
+  const body = r === 'stats' ? viewStats(D) : r === 'park' ? viewPark(D) : viewToday(D);
+  $app.innerHTML = banner + `<div class="shell" data-r="${r}">${header(r, nPark, D.t)}<main>${body}</main>${r === 'today' ? viewSide(D) : ''}</div>` +
+    `<nav class="tabbar" aria-label="Sekmeler">${navLinks(r, nPark, 'tab')}</nav>`;
+  document.title = { today: 'IOI Tracker', park: 'Park alanı · IOI Tracker', stats: 'İstatistik · IOI Tracker' }[r];
 }
 
 // ---------------------------------------------------------------- Bugün
-function elapsed() {
-  if (!state.timer) return '00:00';
-  const sec = Math.max(0, Math.floor((Date.now() - state.timer.start) / 1000));
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-  const p = (n) => String(n).padStart(2, '0');
-  return h ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
+function topline(t) {
+  const k = diffDays(t, PLAN.start);
+  const wk = k >= 0 && k < NW * 7 ? ` · Hafta ${Math.floor(k / 7)} / ${NW - 1}` : '';
+  const d = parse(t);
+  return `<div class="topline"><div class="eyebrow">${DAYS_LONG[dow(t)]} · ${d.getDate()} ${MON3[d.getMonth()]}${wk}</div>
+    <span class="exam-pill">Sınava ${Math.max(0, diffDays(PLAN.exam, t))} gün</span></div>`;
 }
 
-function codeChip(code) {
-  const c = lineColor(code);
-  return `<span class="code" style="color:${c};background:${rgba(c, 0.14)}">${esc(code)}</span>`;
+function tagHtml(e, D) {
+  const x = e.x;
+  if (e.tag === 'dev') return `<span class="tag">Devreden<span>· ${esc(dMid(x.date))}</span></span>`;
+  if (e.tag === 'ret') { const p = D.parks[x.id]; return `<span class="tag ret">Parktan döndü${p ? `<span>· ${esc(dShort(p.parkedOn))} park edildi</span>` : ''}</span>`; }
+  if (e.tag === 'ahead') return `<span class="tag ahead">İleriden<span>· ${esc(dMid(x.date))}</span></span>`;
+  if (e.tag === 'future') return `<span class="tag ahead">${esc(dLong(x.date))}</span>`;
+  return '';
 }
-function topicTag(code) {
-  return `<span class="ttag">${codeChip(code)}<span>${esc(topicName(code))}</span></span>`;
-}
-const lineLong = (l) => String(l || '').split('+').map((x) => (LINES[x] ? LINES[x].n : x)).join(' + ');
 
-function viewToday(d) {
-  const t = today();
+function rowHtml(e, D) {
+  const x = e.x, dn = D.done(x.id), b = badgeOf(x);
+  return `<div class="trow${dn ? ' is-done' : ''}">
+    <div class="trow-main">
+      <div class="trow-t">${chip(b)}<span class="trow-name">${esc(x.label)}</span></div>
+      <div class="trow-m">${tagHtml(e, D)}<span class="dur" title="Planlanan süre — ölçülmez, sadece bilgi">${fmtH(x.h)} sa planlı</span>${x.src ? `<span class="src">${esc(x.src)}</span>` : ''}</div>
+      <details class="trow-d"><summary>Görevin ayrıntısı</summary><p>${esc(x.task)}</p></details>
+    </div>
+    <button type="button" class="ib" data-action="park" data-id="${x.id}" title="Park et" aria-label="${esc(b)} ${esc(x.label)}: park et" ${dn ? 'disabled' : ''}>${I.park}</button>
+    <button type="button" class="donebtn" data-action="toggle" data-id="${x.id}" data-tag="${e.tag || 'today'}" aria-pressed="${dn}" aria-label="${esc(b)} ${esc(x.label)}: ${dn ? 'bitti, geri almak için dokun' : 'bitti olarak işaretle'}"><span class="box">${dn ? I.check : ''}</span><span class="lbl">Bitti</span></button>
+  </div>`;
+}
+
+function viewToday(D) {
+  const t = D.t;
+  const list = todayList(D);
+  const ls = lastStudy(D);
+  const nx = nextOpen(D, list);
+  const nDone = list.filter((e) => D.done(e.x.id)).length;
+  const nPark = activeParks(D).length;
+
+  const lastHtml = ls
+    ? `<div class="kc-l"><span class="lbl2">Son çalışma</span><div class="kc-day">${esc(dLong(ls.day))} <span>· ${esc(ls.ago)}</span></div></div>
+       <div class="kc-l"><span class="lbl2">O gün biten</span><div class="dchips">${ls.items.map((x) => `<span class="dchip">${chip(badgeOf(x))}${esc(x.label)}<i>${I.check}</i></span>`).join('')}</div></div>`
+    : `<div class="kc-l"><span class="lbl2">Son çalışma</span><div class="kc-day">Henüz bitmiş görev yok</div></div>`;
+
+  let nextHtml;
+  if (nx) {
+    const x = nx.x;
+    const note = nx.tag === 'dev' ? `Devreden · ${dLong(x.date)}` : nx.tag === 'ret' ? 'Parktan döndü' : nx.tag === 'future' ? `Bugünün listesi bitti · ${dLong(x.date)}` : 'Bugünün görevi';
+    nextHtml = `<div class="kc-next">
+      <span class="lbl2 acc">Sıradaki konu</span>
+      <div class="kn-t">${chip(badgeOf(x))}<span>${esc(note)}</span></div>
+      <div class="kn-name">${esc(x.label)}</div>
+      <div class="kn-m">${esc(lineLong(x.line))} · ${fmtH(x.h)} sa planlı${x.src ? ' · ' + esc(x.src) : ''}</div>
+      <p class="kn-task">${esc(x.task)}</p>
+      ${nx.tag === 'future' ? `<button type="button" class="btn btn-sm" data-action="toggle" data-id="${x.id}" data-tag="ahead">${I.check}Şimdiden bitti işaretle</button>` : ''}
+    </div>`;
+  } else {
+    nextHtml = `<div class="kc-next"><span class="lbl2 acc">Sıradaki konu</span><div class="kn-name">Plan tamamlandı</div><div class="kn-m">Sınav sonrası: C++ ve USACO hattı</div></div>`;
+  }
+
+  return `<div class="home">
+    ${topline(t)}
+    <section class="kcard" aria-labelledby="kc-h"><div class="kc-left"><h2 id="kc-h" class="lbl2">Kaldığın yer</h2>${lastHtml}</div>${nextHtml}</section>
+    <section class="tlist" aria-labelledby="tl-h">
+      <div class="sec-h"><h2 id="tl-h">Bugünün konuları</h2><span>${list.length ? `${list.length} görev · ${nDone} bitti` : ''}</span></div>
+      ${list.length ? `<div class="rows">${list.map((e) => rowHtml(e, D)).join('')}</div>` : `<div class="empty">Bugün planda görev yok. Sıradaki görev yukarıda; istersen şimdiden bitirebilirsin.</div>`}
+      ${nPark ? `<a class="link-more" href="#/park">Park alanında ${nPark} konu var ${I.arrow}</a>` : ''}
+    </section>
+    ${weekStrip(D)}
+  </div>`;
+}
+
+function weekStrip(D) {
+  const t = D.t;
   const k = diffDays(t, PLAN.start);
   const w = curWeek(t);
-  const task = shownTask(d.topics);
-  const open = firstOpen(d.topics);
-  const todayTask = taskOnDate(t);
-
-  let eyebrow, title, meta = '', detail = '', kind = 'none';
-  if (!task) {
-    eyebrow = `${DAYS_LONG[dow(t)]} · ${parse(t).getDate()} ${MONTHS[parse(t).getMonth()]}`;
-    title = 'Plan tamamlandı';
-    meta = '<span>Tüm görevler bitti. Sınav sonrası: C++ ve USACO hattı</span>';
-  } else {
-    const td = parse(task.date);
-    const done = isDone(d.topics, task.id);
-    const when = `${DAYS_LONG[dow(task.date)]} ${td.getDate()} ${MONTHS[td.getMonth()]}`;
-    kind = done ? 'done' : task.date < t ? 'late' : task.date === t ? 'today' : 'ahead';
-    const lbl = { done: '✓ Tamamlandı', late: 'Gecikmiş görev', today: 'Bugünün görevi', ahead: 'İleriden çalışıyorsun' }[kind];
-    eyebrow = `<span class="kind" data-k="${kind}">${lbl}</span> · ${when} · Hafta ${task.week}`;
-    title = task.label;
-    const tags = task.codes.length ? `<div class="tags">${task.codes.map(topicTag).join('')}</div>` : '';
-    meta = `${tags}<div class="meta-row"><span>${esc(lineLong(task.line))} · ${fmtH(task.h)} saat${task.src ? ' · Kaynak: ' + esc(task.src) : ''}</span></div>`;
-    detail = `<p class="task-text">${esc(task.task)}</p>`;
-  }
-  const restNote = task && !todayTask && k >= 0 && task.date > t && !state.sel
-    ? `<div class="note-line">Bugün planda görev yok (dinlenme günü). İstersen sıradaki göreve şimdiden başlayabilirsin.</div>` : '';
-
-  const idx = task ? TASKS.indexOf(task) : -1;
-  const nav = task ? `<div class="tnav">
-      <button type="button" class="icon-btn" data-action="task-prev" aria-label="Önceki görev" ${idx <= 0 ? 'disabled' : ''}>${I.left}</button>
-      ${kind === 'done'
-        ? `<button type="button" class="btn btn-sm" data-action="task-undo">Geri al (bitmedi)</button>`
-        : `<button type="button" class="btn btn-sm" data-action="task-done">${I.check}Bitti olarak işaretle</button>`}
-      <button type="button" class="icon-btn" data-action="task-next" aria-label="Sonraki görev" ${idx >= TASKS.length - 1 ? 'disabled' : ''}>${I.right}</button>
-    </div>
-    ${state.sel && open && state.sel !== open.id ? `<button type="button" class="link-btn" data-action="task-home">Sıradaki açık göreve dön</button>` : ''}` : '';
-
-  const act = k < 0 ? 0 : weekActH(w, d.byDay);
-  const plan = weekPlanH(w);
-  const R = 108, circ = 2 * Math.PI * R;
-  const frac = plan ? clamp(act / plan, 0, 1) : 0;
-
-  const buttons = state.timer
-    ? `<div class="run-wrap"><div class="timer-pill"><span class="dot"></span>Oturum sürüyor <b data-timer>${elapsed()}</b></div>
-       <div class="btns"><button type="button" class="btn btn-primary" data-action="timer-stop">${I.stop}Bitir ve kaydet</button>
-       <button type="button" class="btn" data-action="timer-cancel">Vazgeç</button></div></div>`
-    : `<div class="btns"><button type="button" class="btn btn-primary" data-action="timer-start">${I.play}Oturumu başlat</button>
-       <button type="button" class="btn" data-action="open-log">${I.plus}Kayıt ekle</button></div>`;
-
-  const sp = setPoints(d.sessions);
-  const lastSet = sp.length ? `%${sp[sp.length - 1].v}` : '—';
-  const toExam = diffDays(PLAN.exam, t);
-
-  const sw = task ? task.week : w;
-  const strip = weekDates(sw).map((s, i) => {
-    const p = PLAN.weeks[sw].days[i];
-    const a = d.byDay[s] || 0;
-    const tk = p.h > 0 ? `task:${sw}.${i}` : null;
-    const dn = tk && isDone(d.topics, tk);
-    let cls, val;
-    if (dn) { cls = 'done'; val = a ? fmtH(a / 60) : fmtH(p.h); }
-    else if (s === t) { cls = 'today-c'; val = a ? fmtH(a / 60) : (p.h ? fmtH(p.h) : '—'); }
-    else if (s < t) {
-      if (a) { cls = 'done'; val = fmtH(a / 60); }
-      else if (p.h && k >= 0) { cls = 'miss'; val = fmtH(p.h); }
-      else { cls = 'rest'; val = p.h ? fmtH(p.h) : '—'; }
-    } else { cls = p.h ? 'next' : 'rest next'; val = p.h ? fmtH(p.h) : '—'; }
-    if (s === t && cls !== 'today-c') cls += ' is-today';
-    if (task && tk === task.id) cls += ' sel';
-    const ln = p.h > 0 ? (p.codes[0] || (LINES[(p.line || 'T')[0]] || LINES.T).s) : 'boş';
-    const inner = `<span class="dl">${DAYS[i]}${dn ? ' <b class="ok">✓</b>' : ''}</span><span class="dv">${val}</span><span class="dc" style="color:${p.line ? lineColor(p.line) : '#8A8A92'}">${esc(ln)}</span>`;
-    const tip = `${esc(dateLabel(s))}${p.label ? ' · ' + esc(p.label) : ' · görev yok'}${dn ? ' · bitti' : ''}`;
-    return tk
-      ? `<button type="button" class="${cls}" data-action="pick-task" data-id="${tk}" title="${tip}" aria-label="${DAYS_LONG[i]}: ${esc(p.label)}${dn ? ', bitti' : ''}">${inner}</button>`
-      : `<div class="${cls}" title="${tip}">${inner}</div>`;
+  const cells = [0, 1, 2, 3, 4, 5, 6].map((i) => {
+    const s = addDays(PLAN.start, w * 7 + i);
+    const p = PLAN.weeks[w].days[i];
+    const id = p.h > 0 ? `task:${w}.${i}` : null;
+    let cls, val, sub, sc;
+    if (!id) { cls = 'rest'; val = '—'; sub = 'boş'; sc = '#6E6E76'; }
+    else if (D.parkedNow(id)) { cls = 'park'; val = 'park'; sub = badgeOf(TASK_BY_ID[id]); sc = SAND; }
+    else {
+      const dn = D.done(id);
+      val = dn ? '1/1 ✓' : '0/1';
+      sub = badgeOf(TASK_BY_ID[id]);
+      sc = lineColor(sub);
+      cls = dn ? 'full' : s < t ? 'open' : s > t ? 'future' : '';
+    }
+    if (s === t) cls += ' today';
+    const tip = `${DAYS_LONG[i]} ${dShort(s)}${id ? ' · ' + TASK_BY_ID[id].label : ' · görev yok'}`;
+    return `<div class="${cls}" title="${esc(tip)}"><span class="dl">${DAYS[i]} <span class="mono">${parse(s).getDate()}</span></span><span class="dv">${val}</span><span class="dc" style="color:${sc}">${esc(sub)}</span></div>`;
   }).join('');
+  const range = `${dShort(addDays(PLAN.start, w * 7))}–${dShort(addDays(PLAN.start, w * 7 + 6))}`;
+  return `<section class="week" aria-labelledby="wk-h">
+    <div class="sec-h"><h2 id="wk-h">Hafta ${k < 0 ? 0 : w} · ${range}</h2><span>biten / planlanan</span></div>
+    <div class="strip">${cells}</div>
+  </section>`;
+}
 
-  return `<div class="today">
-    <div class="hero">
-      <div class="eyebrow">${eyebrow}</div>
-      <h1 class="h1">${esc(title.replace(/ · /g, ', '))}</h1>
-      <div class="meta">${meta}</div>
-      ${detail}
-      ${nav}
-      ${restNote}
+// iPad yatay: sağ panelde özet
+function viewSide(D) {
+  const nDone = TOPIC_CODES.filter((c) => topicDone(D, c)).length;
+  const ps = planStatus(D);
+  const parks = activeParks(D);
+  const long = parks.filter((p) => p.days >= 14).length;
+  return `<aside class="side" aria-label="Özet">
+    <div class="eyebrow">Özet</div>
+    <div class="kpi"><span class="k">Biten konu</span><div class="v"><b>${nDone}</b><span>/ ${TOPIC_CODES.length}</span></div><div class="bar"><i style="width:${(nDone / TOPIC_CODES.length * 100).toFixed(1)}%"></i></div></div>
+    <div class="side2">
+      <div class="kpi"><span class="k">Plana göre</span><div class="v"><b>${esc(ps.big)}</b></div><span class="s">${esc(ps.unit)}</span></div>
+      <div class="kpi"><span class="k">Parkta</span><div class="v"><b>${parks.length}</b></div><span class="s" ${long ? `style="color:${SAND}"` : ''}>${long ? `${long} konu 14+ gün` : 'konu'}</span></div>
     </div>
-    <div class="ring" role="img" aria-label="Bu hafta ${fmtH(act)} / ${fmtH(plan)} saat">
-      <svg width="248" height="248" viewBox="0 0 248 248" aria-hidden="true">
-        <circle cx="124" cy="124" r="${R}" fill="none" stroke="#18181B" stroke-width="14"/>
-        ${frac > 0 ? `<circle cx="124" cy="124" r="${R}" fill="none" stroke="${ACC}" stroke-width="14" stroke-linecap="round" stroke-dasharray="${(circ * frac).toFixed(1)} ${circ.toFixed(1)}"/>` : ''}
-      </svg>
-      <div class="ring-in"><div class="ring-big">${fmtH(act)}</div><div class="ring-sub">/ ${fmtH(plan)} saat bu hafta</div></div>
+    <div class="card">${linesHtml(D, true)}</div>
+  </aside>`;
+}
+
+// ---------------------------------------------------------------- Park alanı
+function viewPark(D) {
+  const parks = activeParks(D);
+  const long = parks.filter((p) => p.days >= 14).length;
+  const sum = parks.length ? `${parks.length} konu plan sırasından geçici olarak çıkarıldı${long ? ` · ${long} tanesi 14 günden uzun süredir bekliyor` : ''}` : 'Parkta konu yok';
+  const cards = parks.map((p) => {
+    const x = p.x, lg = p.days >= 14, b = badgeOf(x);
+    return `<article class="pcard${lg ? ' long' : ''}">
+      <div class="pc-h"><div class="pc-t">${chip(b)}<b>${esc(x.label)}</b></div>${lg ? `<span class="lbadge">${I.clock}14+ gün</span>` : ''}</div>
+      <div class="pc-g">
+        <div><span>Park tarihi</span><b>${esc(dShort(p.parkedOn))}</b></div>
+        <div><span>Parkta</span><b ${lg ? `style="color:${SAND}"` : ''}>${p.days} gün</b></div>
+        <div><span>Dönüş</span><b ${p.backOn ? '' : 'class="muted"'}>${p.backOn ? esc(dMid(p.backOn)) : 'Belirsiz'}</b></div>
+      </div>
+      <div class="pc-r"><span>Sebep</span><p>${p.reason ? `“${esc(p.reason)}”` : '<i class="muted">Sebep yazılmadı</i>'}</p></div>
+      <div class="pc-p">Planda: ${esc(dLong(x.date))} · ${fmtH(x.h)} sa${x.src ? ' · ' + esc(x.src) : ''}</div>
+      <div class="pc-b">
+        <button type="button" class="btn btn-sm acc-o" data-action="park-today" data-id="${x.id}">Bugüne al</button>
+        <button type="button" class="btn btn-sm" data-action="park-queue" data-id="${x.id}">Sıraya geri koy</button>
+      </div>
+    </article>`;
+  }).join('');
+  return `<div class="parkv">
+    <div class="pv-head">
+      <div><div class="eyebrow">${esc(dLong(D.t))}</div><h1>Park alanı</h1><p>${esc(sum)}</p></div>
+      <div class="pv-help"><b>Bugüne al:</b> konu bugünün listesine eklenir.<br><b>Sıraya geri koy:</b> plandaki yerine döner; günü geçtiyse “Devreden” olur.</div>
     </div>
-    ${buttons}
-    <div class="mini">
-      <div><b>${streak(t, d.byDay)} gün</b><span>seri</span></div>
-      <div><b>${toExam >= 0 ? toExam + ' gün' : '—'}</b><span>sınava</span></div>
-      <div><b>${lastSet}</b><span>son set</span></div>
-    </div>
-    <section class="strip-wrap" aria-label="Hafta ${sw} görevleri"><div class="strip-h">Hafta ${sw}${task && PLAN.weeks[sw].title ? ' · ' + esc(PLAN.weeks[sw].title) : ''}</div><div class="strip">${strip}</div></section>
-    <a class="link-more" href="#/istatistik">Tüm istatistikler ${I.arrow}</a>
+    ${parks.length ? `<div class="pgrid">${cards}</div>` : `<div class="empty big"><b>Park alanı boş</b><span>Bugün listesindeki P düğmesiyle bir konuyu geçici olarak buraya alabilirsin.</span></div>`}
   </div>`;
 }
 
 // ---------------------------------------------------------------- İstatistik
-function viewStats(d) {
-  const t = today();
+function linesHtml(D, compact) {
+  const rows = ['C', 'M', 'G', 'A'].map((L) => {
+    const codes = TOPIC_CODES.filter((c) => c[0] === L);
+    const n = codes.filter((c) => topicDone(D, c)).length;
+    const col = LINES[L].c;
+    const pct = codes.length ? (n / codes.length) * 100 : 0;
+    return compact
+      ? `<div class="lb c"><span class="mono" style="color:${col}">${L}</span><div class="bar"><i style="width:${pct.toFixed(1)}%;background:${col}"></i></div><span class="mono">${n}<span class="muted">/${codes.length}</span></span></div>`
+      : `<div class="lb"><div class="lb-t">${chip(L)}<span>${LINES[L].n}</span><b class="mono">${n} <span class="muted">/ ${codes.length}</span></b></div><div class="bar thick"><i style="width:${pct.toFixed(1)}%;background:${col}"></i></div></div>`;
+  }).join('');
+  return `<div class="fh"><div class="t"><b>Hatlara göre biten konu</b>${compact ? '' : '<span>Her hattın kaç konusu bitti</span>'}</div></div><div class="lbs">${rows}</div>`;
+}
+
+function heatHtml(D) {
+  const t = D.t;
   const k = diffDays(t, PLAN.start);
   const we = k < 0 ? 0 : curWeek(t);
-  const ws = state.range === '8' ? Math.max(0, we - 7) : 0;
-  const totalH = d.sessions.reduce((a, r) => a + (r.minutes || 0), 0) / 60;
-
-  // plana uyum (dün itibarıyla)
-  let planned = 0, done = 0;
-  for (let i = 0; i < NW * 7; i++) {
-    const s = addDays(PLAN.start, i);
-    if (s >= t) break;
-    planned += PLAN.weeks[Math.floor(i / 7)].days[i % 7].h;
-  }
-  for (const r of d.sessions) if (r.day < t) done += (r.minutes || 0) / 60;
-
-  const st = (c) => d.topics[c] || 'todo';
-  const nDone = TOPIC_CODES.filter((c) => st(c) === 'done').length;
-  const nDoing = TOPIC_CODES.filter((c) => st(c) === 'doing').length;
-  const sp = setPoints(d.sessions);
-  const lastSet = sp.length ? sp[sp.length - 1].v : null;
-  const deltaSet = sp.length > 1 ? lastSet - sp[0].v : null;
-  const rangeLbl = `${dateLabel(addDays(PLAN.start, ws * 7))} → ${dateLabel(k < 0 ? addDays(PLAN.start, 6) : t)}`;
-
-  return `<div class="stats">
-    <div class="stats-head">
-      <div><div class="eyebrow">${rangeLbl} · ${we - ws + 1} hafta</div><h1>İstatistik</h1></div>
-      <div class="seg" role="group" aria-label="Zaman aralığı">
-        <button type="button" data-action="range" data-v="8" aria-pressed="${state.range === '8'}">Son 8 hafta</button>
-        <button type="button" data-action="range" data-v="all" aria-pressed="${state.range === 'all'}">Tümü</button>
-      </div>
-    </div>
-
-    <div class="kpis">
-      <div class="kpi"><span class="k">Toplam çalışma</span><div class="v"><b>${fmtH(totalH)}</b><span>/ ${fmtH(PLAN_TOTAL)} sa</span></div><div class="bar"><i style="width:${clamp((totalH / PLAN_TOTAL) * 100, 0, 100).toFixed(1)}%"></i></div></div>
-      <div class="kpi"><span class="k">Plana uyum</span><div class="v"><b>${planned ? '%' + Math.round((done / planned) * 100) : '—'}</b></div><span class="s">${planned ? `${fmtH(done)} / ${fmtH(planned)} sa · dün itibarıyla` : 'plan henüz başlamadı'}</span></div>
-      <div class="kpi"><span class="k">Biten konu</span><div class="v"><b>${nDone}</b><span>/ ${TOPIC_CODES.length}</span></div><span class="s">${nDoing} konu devam ediyor</span></div>
-      <div class="kpi"><span class="k">Pazar seti başarısı</span><div class="v"><b>${lastSet == null ? '—' : '%' + lastSet}</b>${deltaSet != null ? `<span style="color:${deltaSet >= 0 ? ACC : '#FF8A7A'}">${deltaSet >= 0 ? '↑' : '↓'} ${Math.abs(deltaSet)} puan</span>` : ''}</div><span class="s">${sp.length ? `ilk set %${sp[0].v}` : 'henüz set kaydı yok'}</span></div>
-    </div>
-
-    <div class="row">
-      <figure class="card w2">${weeklyChart(d, ws, we, t)}</figure>
-      <figure class="card w1">${linesCard(d)}</figure>
-    </div>
-    <div class="row">
-      <figure class="card wh">${setCard(sp)}</figure>
-      <figure class="card wh">${heatCard(d, ws, we, t)}</figure>
-    </div>
-    <div class="row">
-      <figure class="card w2">${topicCard(d)}</figure>
-      <figure class="card w1">${errorCard(d)}</figure>
-    </div>
-    <figure class="card">${examCard(d, t)}</figure>
-    <section class="card" aria-labelledby="rec-h">${recentCard(d)}</section>
-  </div>`;
-}
-
-function figHead(title, sub, right = '') {
-  return `<figcaption class="fh"><div class="t"><b>${title}</b>${sub ? `<span>${sub}</span>` : ''}</div>${right}</figcaption>`;
-}
-
-function weeklyChart(d, ws, we, t) {
-  const items = [];
-  for (let w = ws; w <= we; w++) items.push({ w, act: weekActH(w, d.byDay), plan: weekPlanH(w) });
-  const n = items.length;
-  const max = Math.max(10, ...items.map((i) => Math.max(i.act, i.plan)));
-  const top = Math.ceil(max / 5) * 5;
-  const H = 200, sc = H / top;
-  const step = top <= 20 ? 5 : 10;
-  const ticks = []; for (let v = 0; v <= top; v += step) ticks.push(v);
-  const cw = state.range === 'all' ? Math.min(we, NW - 1) : -1;
-  const showVals = n <= 12;
-  const cols = items.map((i) => {
-    const cur = i.w === we && diffDays(t, PLAN.start) >= 0;
-    return `<div class="col" title="Hafta ${i.w}: ${fmtH(i.act)} / ${fmtH(i.plan)} sa">
-      <div class="b" style="height:${(i.act * sc).toFixed(1)}px;${cur ? `background:${rgba(ACC, 0.42)}` : ''}"></div>
-      <div class="p" style="bottom:${(i.plan * sc).toFixed(1)}px"></div>
-      ${showVals ? `<div class="vl" style="bottom:${(Math.max(i.act, i.plan) * sc + 6).toFixed(1)}px">${fmtH(i.act)}</div>` : ''}
-    </div>`;
-  }).join('');
-  const labels = items.map((i) => `<span>${n > 16 && i.w % 2 ? '' : 'H' + i.w}</span>`).join('');
-  void cw;
-  return figHead('Haftalık saat', 'Gerçekleşen ve plan, hafta hafta', `<div class="legend"><span><i class="sw" style="background:${ACC}"></i>Gerçek</span><span><i style="width:14px;border-top:2px dashed #A1A1A8;display:inline-block"></i>Plan</span></div>`) +
-    `<div class="chart">
-      <div class="yax" style="height:${H}px">${ticks.map((v) => `<span style="bottom:${v * sc}px">${v}</span>`).join('')}</div>
-      <div class="plot">
-        <div class="plot-area" style="height:${H}px">
-          ${ticks.map((v) => `<div class="gl" style="bottom:${v * sc}px;${v === 0 ? 'border-color:#2A2A2E' : ''}"></div>`).join('')}
-          <div class="cols" style="grid-template-columns:repeat(${n},minmax(0,1fr))">${cols}</div>
-        </div>
-        <div class="xl" style="grid-template-columns:repeat(${n},minmax(0,1fr))">${labels}</div>
-      </div>
-    </div>`;
-}
-
-function linesCard(d) {
-  const sums = {};
-  let tot = 0;
-  for (const r of d.sessions) { const l = LINES[r.line] ? r.line : 'T'; sums[l] = (sums[l] || 0) + (r.minutes || 0); tot += r.minutes || 0; }
-  const keys = LINE_KEYS.filter((l) => sums[l]).sort((a, b) => sums[b] - sums[a]);
-  const head = figHead('Hatlara göre dağılım', tot ? `${fmtH(tot / 60)} saatin nereye gittiği` : '');
-  if (!tot) return head + '<div class="empty">İlk kayıttan sonra dolacak</div>';
-  return head +
-    `<div class="stack">${keys.map((l) => `<div style="flex:${sums[l]} 1 0;background:${LINES[l].c}" title="${LINES[l].n}"></div>`).join('')}</div>
-    <div>${keys.map((l) => `<div class="lrow"><i class="sw" style="background:${LINES[l].c}"></i><span class="mono" style="font-size:12px;font-weight:600;color:${LINES[l].c};width:14px">${l}</span><span class="n">${LINES[l].n}</span><span class="h">${fmtH(sums[l] / 60)} sa</span><span class="pc">%${Math.round((sums[l] / tot) * 100)}</span></div>`).join('')}</div>`;
-}
-
-function setCard(sp) {
-  const head = figHead('Pazar madencilik seti', 'Haftalık doğru oranı (%)');
-  if (!sp.length) return head + '<div class="empty">“Deneme / set” hattında doğru ve toplam soru girdiğinde burada eğri oluşur</div>';
-  const pts = sp.slice(-16);
-  const x0 = 56, x1 = 456, yT = 20, yB = 180;
-  const xs = pts.length === 1 ? [(x0 + x1) / 2] : pts.map((_, i) => x0 + (i * (x1 - x0)) / (pts.length - 1));
-  const y = (v) => yB - (v / 100) * (yB - yT);
-  const P = pts.map((p, i) => `${xs[i].toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
-  const many = pts.length > 10;
-  return head + `<svg viewBox="0 0 500 212" width="100%" role="img" aria-label="Set doğru oranı: ${pts.map((p) => p.label + ' %' + p.v).join(', ')}" style="display:block;height:auto;font-family:var(--mono)">
-    ${[100, 75, 50, 25, 0].map((v) => `<line x1="40" y1="${y(v)}" x2="490" y2="${y(v)}" stroke="${v ? '#1F1F23' : '#2A2A2E'}"/>${v ? `<text x="0" y="${y(v) + 4}" font-size="11" fill="#8A8A92">${v}</text>` : ''}`).join('')}
-    ${pts.length > 1 ? `<polygon points="${xs[0].toFixed(1)},${yB} ${P} ${xs[xs.length - 1].toFixed(1)},${yB}" fill="${rgba(ACC, 0.1)}"/><polyline points="${P}" fill="none" stroke="${ACC}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>` : ''}
-    ${pts.map((p, i) => `<circle cx="${xs[i].toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="${i === pts.length - 1 ? 5.5 : 4.5}" fill="${i === pts.length - 1 ? ACC : '#131315'}" stroke="${ACC}" stroke-width="2.5"/>` +
-      (!many || i === pts.length - 1 ? `<text x="${xs[i].toFixed(1)}" y="${(y(p.v) - 13).toFixed(1)}" font-size="12" fill="#EDEDEF" text-anchor="middle">${p.v}</text>` : '') +
-      (!many || i % 2 === 0 ? `<text x="${xs[i].toFixed(1)}" y="204" font-size="11" fill="#A1A1A8" text-anchor="middle">${p.label}</text>` : '')).join('')}
-  </svg>`;
-}
-
-function heatCard(d, ws, we, t) {
-  const n = we - ws + 1;
-  const lv = (h) => (h <= 0 ? 0 : h <= 1 ? 0.22 : h <= 1.5 ? 0.45 : h <= 2 ? 0.72 : 1);
-  const legend = [0, 0.22, 0.45, 0.72, 1].map((a) => `<i class="sw" style="width:12px;height:12px;background:${a ? rgba(ACC, a) : '#18181B'}"></i>`).join('');
-  let html = `<div></div>`;
-  let prevM = -1;
-  for (let w = ws; w <= we; w++) {
-    const m = parse(addDays(PLAN.start, w * 7));
-    const lbl = m.getMonth() !== prevM ? `${m.getDate()} ${MON3[m.getMonth()]}` : String(m.getDate());
-    prevM = m.getMonth();
-    html += `<span class="hh">${n > 12 && (w - ws) % 2 ? '' : lbl}</span>`;
-  }
+  const n = we + 1;
+  const counts = {};
+  for (const x of TASKS) { const d = D.doneDay(x.id); if (d) counts[d] = (counts[d] || 0) + 1; }
+  let html = '<div></div>';
+  for (let w = 0; w <= we; w++) html += `<span class="hh">${n > 10 && w % 2 ? '' : dShort(addDays(PLAN.start, w * 7))}</span>`;
   for (let i = 0; i < 7; i++) {
     html += `<span class="hl">${DAYS[i]}</span>`;
-    for (let w = ws; w <= we; w++) {
+    for (let w = 0; w <= we; w++) {
       const s = addDays(PLAN.start, w * 7 + i);
-      const h = (d.byDay[s] || 0) / 60;
+      const c = counts[s] || 0;
       let style;
       if (s > t) style = 'background:transparent;border:1px dashed #232327';
-      else if (s === t && !h) style = `background:transparent;border-color:${ACC}`;
-      else { const a = lv(h); const bg = a ? rgba(ACC, a) : '#18181B'; style = `background:${bg};${s === t ? `border-color:${ACC}` : ''}`; }
-      html += `<div class="cell" style="${style}" title="${dateLabel(s)} · ${s > t ? 'gelecek' : h ? fmtH(h) + ' sa' : 'kayıt yok'}"></div>`;
+      else style = `background:${c >= 2 ? rgba(ACC, 0.85) : c === 1 ? rgba(ACC, 0.4) : '#18181B'};${s === t ? `border-color:${ACC}` : ''}`;
+      html += `<div class="cell" style="${style}" title="${dShort(s)} · ${s > t ? 'gelecek' : c ? c + ' görev bitti' : 'görev bitmedi'}"></div>`;
     }
   }
-  return figHead('Çalışma takvimi', 'Günlük saat', `<div class="legend" style="gap:4px;align-items:center;font-size:11px;color:#8A8A92"><span style="margin-right:2px">az</span>${legend}<span style="margin-left:2px">çok</span></div>`) +
-    `<div class="heat"><div class="heat-grid" style="grid-template-columns:36px repeat(${n},minmax(${n > 12 ? 14 : 28}px,1fr))">${html}</div></div>`;
+  const legend = [['0', '#18181B'], ['1', rgba(ACC, 0.4)], ['2+', rgba(ACC, 0.85)]].map(([l, c]) => `<span><i class="sw" style="background:${c}"></i>${l}</span>`).join('');
+  return `<div class="fh"><div class="t"><b>Çalışma takvimi</b><span>Hücre koyuluğu = o gün biten görev sayısı</span></div><div class="legend">${legend}</div></div>
+    <div class="heat"><div class="heat-grid" style="grid-template-columns:36px repeat(${n},minmax(${n > 10 ? 16 : 28}px,1fr))">${html}</div></div>`;
 }
 
-function topicCard(d) {
-  const groups = [['C', 'C programlama'], ['M', 'Matematik'], ['G', 'Çizge teorisi'], ['A', 'Algoritma / zeka']];
-  const body = groups.map(([L, name]) => {
+function topicMapHtml(D) {
+  const groups = ['C', 'M', 'G', 'A'].map((L) => {
     const codes = TOPIC_CODES.filter((c) => c[0] === L);
-    const c = LINES[L].c;
-    const done = codes.filter((x) => d.topics[x] === 'done').length;
-    const chips = codes.map((code) => {
-      const s = d.topics[code] || 'todo';
-      const style = s === 'done' ? `background:${rgba(c, 0.16)};border-color:${rgba(c, 0.5)};color:${c}` : s === 'doing' ? `border:1px dashed ${c};color:${c}` : '';
-      const lbl = { todo: 'başlamadı', doing: 'devam', done: 'bitti' }[s];
-      return `<button type="button" class="tchip" style="${style}" data-action="topic" data-code="${code}" title="${esc(PLAN.topics[code])} · ${lbl}" aria-label="${code} ${esc(PLAN.topics[code])}: ${lbl}. Değiştirmek için dokun"><b>${code}</b><span>${esc(PLAN.topics[code])}</span></button>`;
+    const col = LINES[L].c;
+    const n = codes.filter((c) => topicDone(D, c)).length;
+    const chips = codes.map((c) => {
+      const dn = topicDone(D, c), pk = !dn && topicParked(D, c);
+      const style = dn ? `background:${rgba(col, 0.14)};border-color:${rgba(col, 0.5)};color:${col}` : pk ? `border:1px dashed ${SAND};color:${col}` : '';
+      return `<div class="tchip" style="${style}" title="${esc(PLAN.topics[c])} · ${dn ? 'bitti' : pk ? 'parkta' : 'sırada'}"><b>${c}</b><span>${esc(PLAN.topics[c])}</span><i style="color:${dn ? col : SAND}">${dn ? '✓' : pk ? 'P' : ''}</i></div>`;
     }).join('');
-    return `<div class="tg"><div class="tg-h">${name}<span class="c">${done} / ${codes.length}</span><div class="bar"><i style="width:${(done / codes.length) * 100}%;background:${c}"></i></div></div><div class="chips tchips">${chips}</div></div>`;
+    return `<div class="tg"><div class="tg-h">${LINES[L].n}<span class="c">${n} / ${codes.length}</span></div><div class="tchips">${chips}</div></div>`;
   }).join('');
-  return figHead('Konu haritası', 'Dokununca durum değişir: başlamadı → devam → bitti',
-    `<div class="legend"><span><i class="sw" style="background:rgba(237,237,239,.18);border:1px solid rgba(237,237,239,.5)"></i>Bitti</span><span><i class="sw" style="border:1px dashed #EDEDEF"></i>Devam</span><span><i class="sw" style="border:1px solid #2E2E33"></i>Başlamadı</span></div>`) +
-    `<div style="display:flex;flex-direction:column;gap:18px">${body}</div>`;
+  const legend = `<span><i class="sw" style="background:rgba(237,237,239,.18);border:1px solid rgba(237,237,239,.5)"></i>Bitti</span><span><i class="sw" style="border:1px dashed ${SAND}"></i>Parkta (P)</span><span><i class="sw" style="border:1px solid #2E2E33"></i>Sırada</span>`;
+  return `<div class="fh"><div class="t"><b>Konu haritası</b><span>Bir konu, ona ayrılmış görevlerin hepsi bitince “bitti” sayılır</span></div><div class="legend">${legend}</div></div><div class="tgs">${groups}</div>`;
 }
 
-function errorCard(d) {
-  const sums = {}; let tot = 0;
-  for (const r of d.sessions) for (const [k2, v] of Object.entries(r.err || {})) { sums[k2] = (sums[k2] || 0) + (v || 0); tot += v || 0; }
-  const head = figHead('Hata defteri', tot ? `${tot} hata · koda göre` : 'Kayıtlardaki hata kodları');
-  if (!tot) return head + '<div class="empty">Kayıt eklerken “Hata kodları” bölümünden girilebilir</div>';
-  const rows = ERR.map(([k2, n]) => ({ k: k2, n, v: sums[k2] || 0 })).sort((a, b) => b.v - a.v);
-  const max = rows[0].v || 1;
-  const tips = { K: 'zayıf konu saatine al', İ: 'ara sonucu yazma alışkanlığı', O: 'soru kökündeki olumsuz ifadeyi daire içine al', Z: 'tur yöntemine sadık kal', T: 'tuzak listesine yeni satır ekle', S: 'tahmin kuralını uygula' };
-  return head + `<div style="display:flex;flex-direction:column;gap:14px">${rows.map((r, i) => `<div class="erow"><div class="t"><b>${r.k}</b><span>${r.n}</span><i>${r.v}</i></div><div class="bar"><i style="width:${(r.v / max) * 100}%;background:${i === 0 ? ACC : '#5A5F68'}"></i></div></div>`).join('')}</div>
-    <div class="note" style="margin-top:auto">En çok <b>${rows[0].k} · ${rows[0].n.toLowerCase()}</b> → ${tips[rows[0].k]}</div>`;
-}
-
-function examCard(d, t) {
-  const res = {};
-  for (const r of d.sessions) if (r.exam_code) { if (!res[r.exam_code] || res[r.exam_code].created_at < r.created_at) res[r.exam_code] = r; }
-  const next = PLAN.exams.find((e) => e.date >= t && !res[e.code]);
-  const badge = next ? `<span class="badge">${next.code === 'SINAV' ? 'Sınav' : next.code} · ${diffDays(next.date, t) === 0 ? 'bugün' : diffDays(next.date, t) + ' gün sonra'}</span>` : '';
-  const sc = 160 / 50;
-  const cols = PLAN.exams.map((e) => {
-    const r = res[e.code];
-    const nv = r ? net(r) : null;
-    return `<div class="ex" title="${e.code}${e.year ? ' (' + e.year + ')' : ''} · hedef ${e.target}${r ? ' · net ' + fmtH(nv) : ''}">
-      <span class="num">${r ? fmtH(nv) : e.target}</span>
-      <div class="box" style="height:${Math.max(e.target, nv || 0) * sc}px">
-        <div class="tgt" style="height:${e.target * sc}px;${e.code === 'SINAV' ? `border-color:${ACC}` : ''}"></div>
-        ${r ? `<div class="act" style="height:${Math.max(2, nv * sc)}px;${nv < e.target ? 'background:#FFB547' : ''}"></div>` : ''}
-      </div>
-      <span class="cd" style="${e.code === 'SINAV' ? `color:${ACC}` : ''}">${e.code === 'SINAV' ? 'Sınav' : e.code}</span>
-      <span class="dt">${dateLabel(e.date)}</span>
-    </div>`;
-  }).join('');
-  return figHead('Deneme netleri', 'Çerçeve = varsayımsal ara hedef · dolgu = gerçek net (sarı: hedefin altında)', badge) +
-    `<div class="exams"><div class="exams-grid">${cols}</div></div>`;
-}
-
-function recentCard(d) {
-  const rows = d.sessions.slice().sort((a, b) => (b.day + (b.created_at || '')).localeCompare(a.day + (a.created_at || ''))).slice(0, 15);
-  const head = `<div class="fh"><div class="t"><b id="rec-h">Son kayıtlar</b><span>Yanlış girdiysen sil, yeniden ekle</span></div></div>`;
-  if (!rows.length) return head + '<div class="empty">Henüz kayıt yok</div>';
-  return head + `<div class="rec">${rows.map((r) => {
-    const extra = r.exam_code ? ` · ${r.exam_code} net ${fmtH(net(r))}` : r.total ? ` · ${r.correct ?? 0}/${r.total}` : '';
-    const armed = state.armed === r.id;
-    return `<div class="rec-row"><span class="d">${dateLabel(r.day)}</span>${codeChip(r.line)}<span class="tp" title="${esc(r.note || '')}"><span class="tt">${esc(r.topic || '')}${isCode(r.topic) ? ' · ' + esc(PLAN.topics[r.topic]) : ''}</span><span class="m">${fmtMin(r.minutes)}${extra}</span></span><button type="button" class="del" data-action="del" data-id="${esc(r.id)}" ${armed ? 'data-armed' : ''} aria-label="${armed ? 'Silmeyi onayla' : 'Kaydı sil'}">${armed ? 'Sil?' : '×'}</button></div>`;
-  }).join('')}</div>`;
+function viewStats(D) {
+  const t = D.t;
+  const k = diffDays(t, PLAN.start);
+  const nDone = TOPIC_CODES.filter((c) => topicDone(D, c)).length;
+  const N = TOPIC_CODES.length;
+  const ps = planStatus(D);
+  const parks = activeParks(D);
+  const long = parks.filter((p) => p.days >= 14);
+  const set = lastSet(D);
+  const tasksDone = TASKS.filter((x) => D.done(x.id)).length;
+  return `<div class="stats">
+    <div class="stats-head">
+      <div><div class="eyebrow">${dShort(PLAN.start)} → ${dShort(t)}${k >= 0 ? ` · Hafta ${curWeek(t)} / ${NW - 1}` : ''}</div><h1>İstatistik</h1></div>
+      <span class="exam-pill">${N} konu · ${TASKS.length} görev · sınav ${dShort(PLAN.exam)}</span>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><span class="k">Biten konu</span><div class="v"><b>${nDone}</b><span>/ ${N}</span></div><div class="bar"><i style="width:${(nDone / N * 100).toFixed(1)}%"></i></div><span class="s">${tasksDone} / ${TASKS.length} görev bitti</span></div>
+      <div class="kpi"><span class="k">Plana göre durum</span><div class="v"><b>${esc(ps.big)}</b><span>${esc(ps.unit)}</span></div><span class="s">${esc(ps.sub)}</span></div>
+      <div class="kpi"><span class="k">Parktaki konu</span><div class="v"><b>${parks.length}</b><span>konu</span></div><span class="s">${parks.length ? parks.map((p) => badgeOf(p.x)).join(' · ') : 'Park alanı boş'}${long.length ? ` — <span style="color:${SAND}">${long.length} konu 14+ gün</span>` : ''}</span></div>
+      <div class="kpi"><span class="k">Son set</span><div class="v"><b>${set ? set.big : '—'}</b>${set ? '<span>net</span>' : ''}</div><span class="s">${set ? esc(set.sub) : 'Henüz set sonucu yok'}</span></div>
+    </div>
+    <div class="row">
+      <figure class="card wh">${linesHtml(D, false)}</figure>
+      <figure class="card wh">${heatHtml(D)}</figure>
+    </div>
+    <figure class="card">${topicMapHtml(D)}</figure>
+  </div>`;
 }
 
 // ---------------------------------------------------------------- Giriş
@@ -541,99 +455,38 @@ function viewLogin() {
   </form></div>`;
 }
 
-// ---------------------------------------------------------------- Kayıt formu
-function topicOptions(line) {
-  if ('CMGA'.includes(line)) return TOPIC_CODES.filter((c) => c[0] === line).map((c) => ({ v: c, l: `${c} · ${PLAN.topics[c]}` }));
-  return (PRESETS[line] || ['Diğer']).map((x) => ({ v: x, l: x }));
+// ---------------------------------------------------------------- Park et (sheet / popover)
+function nextSaturday(t) { let k = (5 - dow(t) + 7) % 7; if (k === 0) k = 7; return addDays(t, k); }
+function backOnFrom(f, t) {
+  if (f.when === 'yarin') return addDays(t, 1);
+  if (f.when === 'haftasonu') return nextSaturday(t);
+  if (f.when === 'tarih') return f.date && f.date > t ? f.date : addDays(t, 1);
+  return null;
 }
 
-function defaultTopic(line, pd) {
-  const opts = topicOptions(line);
-  if (pd && pd.codes) { const c = pd.codes.find((x) => x[0] === line); if (c) return c; }
-  if (pd && line === 'D') {
-    if (/tam deneme/i.test(pd.label)) return 'Tam deneme';
-    if (/analiz/i.test(pd.label)) return 'Deneme analizi';
-    if (/hız/i.test(pd.label)) return 'Hız seti';
-  }
-  if (pd && line === 'K') { const m = /#(\d)/.exec(pd.task); if (m) return 'Kod Atölyesi #' + m[1]; }
-  return opts[0] ? opts[0].v : '';
-}
-
-function newForm(minutes, fromTimer, taskId) {
-  const t = today();
-  const p = (taskId && TASK_BY_ID[taskId]) || null;
-  let line = p && p.line ? p.line[0] : 'C';
-  if (!LINES[line]) line = 'C';
-  const em = p ? /^(D\d)\b/.exec(p.label) : null;
-  const nextExam = PLAN.exams.find((e) => e.date >= addDays(t, -6));
-  return {
-    day: t, line, topic: defaultTopic(line, p),
-    minutes: minutes || (p ? Math.round(p.h * 60) : 60),
-    correct: '', wrong: '', total: '', exam: em ? em[1] : (nextExam ? nextExam.code : 'D1'),
-    err: {}, note: '', markDone: false, errOpen: false, error: '', fromTimer: !!fromTimer,
-    taskId: p ? p.id : null, taskDone: !!p && !isDone(state.store.snapshot().topics, p.id)
-  };
-}
-
-function sheetLog() {
+function sheetPark() {
+  const x = TASK_BY_ID[state.parkFor];
   const f = state.form;
-  const opts = topicOptions(f.line);
-  const isExam = f.line === 'D' && f.topic === 'Tam deneme';
-  const curSt = state.store.snapshot().topics[f.topic] || 'todo';
-  const errCount = Object.values(f.err).reduce((a, b) => a + b, 0);
-  const n = isExam && f.correct !== '' ? (parseInt(f.correct, 10) || 0) - (parseInt(f.wrong, 10) || 0) / 4 : null;
-  return `<form class="sheet" data-form novalidate>
+  const t = today();
+  const opts = [
+    ['yarin', 'Yarın', dMid(addDays(t, 1))],
+    ['haftasonu', 'Hafta sonu', dMid(nextSaturday(t))],
+    ['tarih', 'Tarih seç', f.date ? dMid(f.date) : 'gün seç'],
+    ['belirsiz', 'Belirsiz', 'elle alırsın']
+  ];
+  const bo = backOnFrom(f, t);
+  return `<form class="sheet" data-park novalidate>
     <div class="grab"></div>
-    <div class="sheet-head"><h2 id="sheet-title">${f.fromTimer ? 'Oturumu kaydet' : 'Kayıt ekle'}</h2><button type="button" class="icon-btn" data-action="close-sheet" aria-label="Kapat">${I.x}</button></div>
-
-    ${f.taskId ? (() => { const tk = TASK_BY_ID[f.taskId]; return isDone(state.store.snapshot().topics, tk.id)
-      ? `<div class="check task-check">✓ Görev zaten bitti: <b>${esc(tk.label)}</b></div>`
-      : `<label class="check task-check"><input type="checkbox" name="taskDone" ${f.taskDone ? 'checked' : ''}><span>Görevi tamamladım: <b>${esc(tk.label)}</b> <span class="muted">(${DAYS[dow(tk.date)]} ${dateLabel(tk.date)})</span><br><span class="muted">İşaretliyse ana ekran sıradaki göreve geçer</span></span></label>`; })() : ''}
-
-    <fieldset><legend>Hat</legend><div class="chips" style="gap:8px">
-      ${LINE_KEYS.map((l) => { const on = l === f.line; const c = LINES[l].c; return `<button type="button" class="hat" data-action="pick-line" data-v="${l}" aria-pressed="${on}" style="${on ? `background:${rgba(c, 0.14)};border-color:${c};color:#EDEDEF` : ''}"><b style="color:${c}">${l}</b>${LINES[l].s}</button>`; }).join('')}
-    </div></fieldset>
-
-    <div class="field"><label for="f-topic">Konu</label>
-      <div class="sel"><select id="f-topic" name="topic">${opts.map((o) => `<option value="${esc(o.v)}" ${o.v === f.topic ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select>${I.chev}</div>
-    </div>
-    ${isCode(f.topic) ? (curSt === 'done' ? `<div class="check">✓ ${f.topic} zaten “bitti” olarak işaretli</div>` : `<label class="check"><input type="checkbox" name="markDone" ${f.markDone ? 'checked' : ''}><span>${f.topic} konusunu bitti olarak işaretle <span class="muted">(şu an: ${curSt === 'doing' ? 'devam' : 'başlamadı'})</span></span></label>`) : ''}
-
-    <div class="field"><span class="lbl">Süre</span>
-      <div class="step">
-        <button type="button" data-action="min" data-v="-15" aria-label="15 dakika azalt">${I.minus}</button>
-        <output aria-live="polite">${fmtMin(f.minutes)}</output>
-        <button type="button" data-action="min" data-v="15" aria-label="15 dakika artır">${I.plus}</button>
-      </div>
-      <div class="presets">${[30, 60, 90, 120].map((m) => `<button type="button" data-action="min-set" data-v="${m}" aria-pressed="${f.minutes === m}">${m < 60 ? m + ' dk' : fmtH(m / 60) + ' sa'}</button>`).join('')}</div>
-    </div>
-
-    ${isExam ? `
-      <div class="field"><label for="f-exam">Deneme</label>
-        <div class="sel"><select id="f-exam" name="exam">${PLAN.exams.map((e) => `<option value="${e.code}" ${e.code === f.exam ? 'selected' : ''}>${e.code === 'SINAV' ? 'Gerçek sınav' : `${e.code} · ${e.year} sınavı`} (${dateLabel(e.date)})</option>`).join('')}</select>${I.chev}</div>
-      </div>
-      <div class="g3">
-        <div class="field"><label for="f-c">Doğru</label><input class="inp num" id="f-c" name="correct" type="number" inputmode="numeric" min="0" max="50" value="${esc(f.correct)}" placeholder="0"></div>
-        <div class="field"><label for="f-w">Yanlış</label><input class="inp num" id="f-w" name="wrong" type="number" inputmode="numeric" min="0" max="50" value="${esc(f.wrong)}" placeholder="0"></div>
-        <div class="field"><label for="f-t">Soru</label><input class="inp num" id="f-t" name="total" type="number" inputmode="numeric" min="1" value="${esc(f.total)}" placeholder="50"></div>
-      </div>
-      <div class="netbox" data-net>Net (4 yanlış 1 doğruyu götürür): <b>${n == null ? '—' : fmtH(n)}</b></div>`
-    : `<div class="g2">
-        <div class="field"><label for="f-c">Doğru <span class="muted">(isteğe bağlı)</span></label><input class="inp num" id="f-c" name="correct" type="number" inputmode="numeric" min="0" value="${esc(f.correct)}" placeholder="0"></div>
-        <div class="field"><label for="f-t">Toplam soru</label><input class="inp num" id="f-t" name="total" type="number" inputmode="numeric" min="0" value="${esc(f.total)}" placeholder="${f.line === 'D' && f.topic === 'Madencilik seti' ? '8' : '0'}"></div>
-      </div>`}
-
-    <details class="errs" data-errs ${f.errOpen ? 'open' : ''}><summary>Hata kodları${errCount ? ` · ${errCount}` : ''} <span class="muted">&nbsp;(isteğe bağlı)</span></summary>
-      <div class="errs-grid">${ERR.map(([k, nm]) => `<div class="ec"><span><b>${k}</b>${nm}</span><button type="button" data-action="err" data-k="${k}" data-v="-1" aria-label="${nm} azalt">${I.minus}</button><output>${f.err[k] || 0}</output><button type="button" data-action="err" data-k="${k}" data-v="1" aria-label="${nm} artır">${I.plus}</button></div>`).join('')}</div>
-    </details>
-
-    <div class="g2">
-      <div class="field"><label for="f-day">Tarih</label><input class="inp" id="f-day" name="day" type="date" value="${esc(f.day)}" max="${today()}"></div>
-      <div></div>
-    </div>
-    <div class="field"><label for="f-note">Not <span class="muted">(isteğe bağlı)</span></label><textarea class="inp" id="f-note" name="note" rows="2" placeholder="Hata defteri için 1 cümlelik kural…">${esc(f.note)}</textarea></div>
-    ${f.error ? `<div class="form-error" role="alert">${esc(f.error)}</div>` : ''}
-    <button type="submit" class="btn btn-primary block">Kaydet</button>
+    <div class="sheet-head"><h2 id="sheet-title">Park et</h2><button type="button" class="icon-btn" data-action="close-sheet" aria-label="Kapat">${I.x}</button></div>
+    <div class="ptopic">${chip(badgeOf(x))}<div><b>${esc(x.label)}</b><span>${esc(dMid(x.date))} · ${fmtH(x.h)} sa planlı${x.src ? ' · ' + esc(x.src) : ''}</span></div></div>
+    <p class="hint">Konu silinmez; plan sırasından geçici olarak çıkar.</p>
+    <div class="field"><label for="p-reason">Sebep <span class="muted">(isteğe bağlı)</span></label><input class="inp" id="p-reason" name="reason" type="text" maxlength="140" autocomplete="off" value="${esc(f.reason)}" placeholder="ör. Önce kombinasyonu oturtayım"></div>
+    <fieldset class="field"><legend>Ne zaman dönsün</legend>
+      <div class="when">${opts.map(([v, l, s]) => `<button type="button" data-action="when" data-v="${v}" aria-pressed="${f.when === v}"><b>${l}</b><span>${esc(s)}</span></button>`).join('')}</div>
+      ${f.when === 'tarih' ? `<input class="inp" type="date" name="date" aria-label="Dönüş tarihi" min="${addDays(t, 1)}" value="${esc(f.date)}">` : ''}
+      <span class="hint">Dönüş: <b>${bo ? esc(dLong(bo)) : 'Belirsiz — Park alanından elle geri alırsın'}</b></span>
+    </fieldset>
+    <div class="sheet-btns"><button type="button" class="btn" data-action="close-sheet">Vazgeç</button><button type="submit" class="btn btn-primary">Park et</button></div>
   </form>`;
 }
 
@@ -645,160 +498,144 @@ function sheetAccount() {
     <div class="grab"></div>
     <div class="sheet-head"><h2 id="sheet-title">Hesap</h2><button type="button" class="icon-btn" data-action="close-sheet" aria-label="Kapat">${I.x}</button></div>
     <div class="acct">
-      ${st.mode === 'demo' ? `<span><b>Demo modu.</b> Veriler örnek ve sadece bu tarayıcıda. config.js dosyasına Supabase bilgileri girilince giriş ekranı açılır.</span>`
+      ${st.mode === 'demo' ? `<span><b>Demo modu.</b> Veriler örnek ve sadece bu tarayıcıda.</span>`
         : `<span>Giriş: <b>${esc(st.user && st.user.email)}</b></span><span>Durum: <b>${esc(si.t)}</b></span><span>Son senkron: <b>${last ? last.toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</b></span>`}
-      <span>Kayıt sayısı: <b>${st.snapshot().sessions.length}</b></span>
     </div>
     ${st.mode === 'demo' ? `<button type="button" class="btn block" data-action="demo-reset">Örnek veriyi sıfırla</button>` : `<button type="button" class="btn block" data-action="sync-now">Şimdi senkronize et</button>
     <button type="button" class="btn block" data-action="logout">Çıkış yap</button>`}
   </div>`;
 }
 
-function renderSheet() {
-  if (!state.sheet) return;
-  const sc = $sheet.scrollTop;
-  $sheet.innerHTML = state.sheet === 'log' ? sheetLog() : sheetAccount();
-  $sheet.scrollTop = sc;
+let anchorEl = null;
+function placeSheet() {
+  $sheet.style.left = ''; $sheet.style.top = '';
+  const pop = state.sheet === 'park' && anchorEl && document.contains(anchorEl) && window.innerWidth >= 760;
+  $sheet.classList.toggle('pop', !!pop);
+  if (!pop) return;
+  const r = anchorEl.getBoundingClientRect();
+  const w = $sheet.offsetWidth, h = $sheet.offsetHeight;
+  const left = clamp(r.right - w, 12, window.innerWidth - w - 12);
+  let top = r.bottom + 8;
+  if (top + h > window.innerHeight - 12) top = Math.max(12, r.top - h - 8);
+  $sheet.style.left = left + 'px';
+  $sheet.style.top = top + 'px';
 }
 
-function openSheet(kind) {
+function renderSheet() {
+  if (!state.sheet) return;
+  $sheet.innerHTML = state.sheet === 'park' ? sheetPark() : sheetAccount();
+  if ($sheet.open) placeSheet();
+}
+
+function openSheet(kind, anchor) {
   state.sheet = kind;
+  anchorEl = anchor || null;
   renderSheet();
   if (!$sheet.open) $sheet.showModal();
-  $sheet.scrollTop = 0;
+  placeSheet();
 }
 
 function closeSheet() {
   state.sheet = null;
+  state.parkFor = null;
   if ($sheet.open) $sheet.close();
 }
 
-function saveForm() {
-  const f = state.form;
-  const num = (v) => (v === '' || v == null || isNaN(parseInt(v, 10)) ? null : Math.max(0, parseInt(v, 10)));
-  const isExam = f.line === 'D' && f.topic === 'Tam deneme';
-  const minutes = Math.round(f.minutes);
-  let total = num(f.total);
-  const correct = num(f.correct);
-  const wrong = isExam ? num(f.wrong) : null;
-  if (isExam && total == null) total = 50;
-  if (f.line === 'D' && f.topic === 'Madencilik seti' && total == null && correct != null) total = 8;
-  if (!f.day || f.day > today()) { f.error = 'Geçerli bir tarih seç.'; return renderSheet(); }
-  if (!(minutes > 0)) { f.error = 'Süre en az 15 dk olmalı.'; return renderSheet(); }
-  if (correct != null && total != null && correct + (wrong || 0) > total) { f.error = 'Doğru + yanlış, soru sayısını geçemez.'; return renderSheet(); }
-  if (isExam && correct == null) { f.error = 'Deneme için doğru sayısını gir.'; return renderSheet(); }
-  const err = {};
-  for (const [k, v] of Object.entries(f.err)) if (v > 0) err[k] = v;
-  const row = {
-    id: uuid(), day: f.day, line: f.line, topic: f.topic, minutes,
-    correct, wrong, total: correct == null ? null : total, exam_code: isExam ? f.exam : null,
-    err, note: f.note.trim() || null, created_at: new Date().toISOString()
+function parkRow(id, backOn, reason, old) {
+  return {
+    id: old ? old.row.id : uuid(), day: old ? old.parkedOn : today(), line: 'T', topic: PARK + id, minutes: 0,
+    correct: null, wrong: null, total: null, exam_code: backOn, err: {}, note: reason || null,
+    created_at: old ? old.row.created_at : new Date().toISOString()
   };
-  state.store.add(row);
-  let advanced = false;
-  if (f.taskId && f.taskDone && !isDone(state.store.snapshot().topics, f.taskId)) { state.store.setTopic(f.taskId, 'done'); advanced = true; if (state.sel === f.taskId) state.sel = null; }
-  if (f.markDone && isCode(f.topic)) state.store.setTopic(f.topic, 'done');
-  else if (isCode(f.topic) && !state.store.snapshot().topics[f.topic]) state.store.setTopic(f.topic, 'doing');
-  if (f.fromTimer) { state.timer = null; LS.set('ioi.timer', null); }
+}
+
+function confirmPark() {
+  const id = state.parkFor;
+  if (!id) return;
+  const t = today();
+  const f = state.form;
+  const D = derive();
+  const row = parkRow(id, backOnFrom(f, t), f.reason.trim(), null);
+  if (D.parks[id]) row.id = D.parks[id].row.id;
+  row.day = t;
+  state.store.put(row);
+  delete state.keep[id];
   closeSheet();
-  toast(advanced ? 'Kaydedildi · sıradaki göreve geçildi' : 'Kaydedildi');
+  toast(`${badgeOf(TASK_BY_ID[id])} park edildi`, { label: 'Geri al', fn: () => { state.store.remove(row.id); } });
   render();
 }
 
 let toastT;
-function toast(msg) {
+function toast(msg, action) {
   let el = document.querySelector('.toast');
   if (!el) { el = document.createElement('div'); el.className = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
-  el.textContent = msg;
+  el.innerHTML = `<span>${esc(msg)}</span>${action ? `<button type="button">${esc(action.label)}</button>` : ''}`;
+  if (action) el.querySelector('button').onclick = () => { action.fn(); el.remove(); render(); };
   clearTimeout(toastT);
-  toastT = setTimeout(() => el.remove(), 2200);
+  toastT = setTimeout(() => el.remove(), action ? 6000 : 2400);
 }
 
 // ---------------------------------------------------------------- olaylar
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-action]');
-  if (!b) {
-    if (state.armed && !e.target.closest('.del')) { state.armed = null; render(); }
-    return;
-  }
+  if (!b) return;
   const a = b.dataset.action;
-  const f = state.form;
+  const st = state.store;
   switch (a) {
-    case 'timer-start': {
-      const tk = shownTask(state.store.snapshot().topics);
-      state.timer = { start: Date.now(), task: tk ? tk.id : null }; LS.set('ioi.timer', state.timer); render(); break;
+    case 'toggle': {
+      const id = b.dataset.id;
+      const D = derive();
+      if (D.done(id)) st.setTopic(id, 'todo');
+      else {
+        st.setTopic(id, 'done');
+        state.keep[id] = b.dataset.tag || 'today';
+        if (D.parks[id]) st.remove(D.parks[id].row.id);
+      }
+      render();
+      break;
     }
-    case 'timer-cancel':
-      state.timer = null; LS.set('ioi.timer', null); render(); break;
-    case 'timer-stop': {
-      const min = Math.max(15, Math.round((Date.now() - state.timer.start) / 60000 / 5) * 5);
-      state.form = newForm(min, true, state.timer.task); openSheet('log'); break;
+    case 'park': {
+      state.parkFor = b.dataset.id;
+      state.form = { reason: '', when: 'haftasonu', date: addDays(today(), 7) };
+      openSheet('park', b);
+      setTimeout(() => { const i = $sheet.querySelector('#p-reason'); if (i && window.innerWidth >= 760) i.focus(); }, 30);
+      break;
     }
-    case 'open-log': { const tk = shownTask(state.store.snapshot().topics); state.form = newForm(null, false, tk ? tk.id : null); if (tk) state.form.taskDone = false; openSheet('log'); break; }
-    case 'task-done': {
-      const tk = shownTask(state.store.snapshot().topics);
-      if (tk) { state.store.setTopic(tk.id, 'done'); state.sel = null; toast('Görev bitti · sıradakine geçildi'); }
-      render(); window.scrollTo(0, 0); break;
+    case 'when': state.form.when = b.dataset.v; renderSheet(); break;
+    case 'park-today': case 'park-queue': {
+      const id = b.dataset.id;
+      const D = derive();
+      const p = D.parks[id];
+      if (!p) break;
+      const before = { ...p.row };
+      if (a === 'park-today') {
+        st.put({ ...p.row, exam_code: D.t });
+        toast(`${badgeOf(TASK_BY_ID[id])} bugüne alındı`, { label: 'Geri al', fn: () => st.put(before) });
+      } else {
+        st.remove(p.row.id);
+        toast(`${badgeOf(TASK_BY_ID[id])} sıraya geri kondu`, { label: 'Geri al', fn: () => st.put(before) });
+      }
+      render();
+      break;
     }
-    case 'task-undo': {
-      const tk = shownTask(state.store.snapshot().topics);
-      if (tk) { state.store.setTopic(tk.id, 'todo'); state.sel = null; toast('Görev tekrar açıldı'); }
-      render(); break;
-    }
-    case 'task-prev': case 'task-next': {
-      const tk = shownTask(state.store.snapshot().topics);
-      const i = tk ? TASKS.indexOf(tk) : -1;
-      const nx = TASKS[i + (a === 'task-next' ? 1 : -1)];
-      if (nx) state.sel = nx.id;
-      render(); break;
-    }
-    case 'task-home': state.sel = null; render(); break;
-    case 'pick-task': state.sel = b.dataset.id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); break;
     case 'close-sheet': closeSheet(); break;
     case 'account': openSheet('account'); break;
-    case 'pick-line':
-      f.line = b.dataset.v; f.topic = defaultTopic(f.line, f.taskId ? TASK_BY_ID[f.taskId] : null); f.markDone = false; f.error = ''; renderSheet(); break;
-    case 'min': f.minutes = clamp(f.minutes + +b.dataset.v, 15, 600); renderSheet(); break;
-    case 'min-set': f.minutes = +b.dataset.v; renderSheet(); break;
-    case 'err': { const k = b.dataset.k; f.err[k] = clamp((f.err[k] || 0) + +b.dataset.v, 0, 99); renderSheet(); break; }
-    case 'range': state.range = b.dataset.v; LS.set('ioi.range', state.range); render(); break;
-    case 'topic': {
-      const code = b.dataset.code;
-      const cur = state.store.snapshot().topics[code] || 'todo';
-      const nx = { todo: 'doing', doing: 'done', done: 'todo' }[cur];
-      state.store.setTopic(code, nx);
-      render();
-      const el = document.querySelector(`[data-action="topic"][data-code="${code}"]`);
-      if (el) el.focus();
-      break;
-    }
-    case 'del':
-      if (state.armed === b.dataset.id) { state.store.remove(b.dataset.id); state.armed = null; toast('Silindi'); }
-      else state.armed = b.dataset.id;
-      render();
-      break;
-    case 'sync-now': state.store.refresh().then(() => { renderSheet(); toast(state.store.status === 'ok' ? 'Güncel' : 'Senkronize edilemedi'); }); break;
-    case 'logout': closeSheet(); state.store.signOut().then(render); break;
-    case 'demo-reset': state.store.signOut(); closeSheet(); render(); toast('Örnek veri sıfırlandı'); break;
+    case 'sync-now': st.refresh().then(() => { renderSheet(); toast(st.status === 'ok' ? 'Güncel' : 'Senkronize edilemedi'); }); break;
+    case 'logout': closeSheet(); st.signOut().then(render); break;
+    case 'demo-reset': st.signOut(); closeSheet(); render(); toast('Örnek veri sıfırlandı'); break;
   }
 });
 
 $sheet.addEventListener('input', (e) => {
-  const el = e.target;
-  if (!el.name || !state.form) return;
-  const f = state.form;
-  if (el.type === 'checkbox') f[el.name] = el.checked;
-  else f[el.name] = el.value;
-  if (el.name === 'topic') { f.markDone = false; renderSheet(); return; }
-  if (el.name === 'correct' || el.name === 'wrong') {
-    const box = $sheet.querySelector('[data-net] b');
-    if (box) box.textContent = f.correct === '' ? '—' : fmtH((parseInt(f.correct, 10) || 0) - (parseInt(f.wrong, 10) || 0) / 4);
-  }
+  if (e.target.name === 'reason') state.form.reason = e.target.value;
 });
-$sheet.addEventListener('toggle', (e) => { if (e.target.matches('[data-errs]') && state.form) state.form.errOpen = e.target.open; }, true);
-$sheet.addEventListener('submit', (e) => { e.preventDefault(); saveForm(); });
-$sheet.addEventListener('close', () => { state.sheet = null; });
+$sheet.addEventListener('change', (e) => {
+  if (e.target.name === 'date') { state.form.date = e.target.value; renderSheet(); }
+});
+$sheet.addEventListener('submit', (e) => { e.preventDefault(); if (state.sheet === 'park') confirmPark(); });
+$sheet.addEventListener('close', () => { state.sheet = null; state.parkFor = null; });
 $sheet.addEventListener('click', (e) => { if (e.target === $sheet) closeSheet(); });
+window.addEventListener('resize', () => { if ($sheet.open) placeSheet(); });
 
 $app.addEventListener('submit', async (e) => {
   if (!e.target.matches('[data-login]')) return;
@@ -810,45 +647,25 @@ $app.addEventListener('submit', async (e) => {
   state.busy = false; render();
 });
 
-window.addEventListener('hashchange', () => { state.armed = null; render(); window.scrollTo(0, 0); });
-setInterval(() => {
-  if (!state.timer) return;
-  document.querySelectorAll('[data-timer]').forEach((el) => { el.textContent = elapsed(); });
-}, 1000);
+window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
 
 // Gün değişince ve uygulamaya dönünce yenile
 let lastDay = today();
 function wake() {
   if (!state.store) return;
-  if (today() !== lastDay) { lastDay = today(); render(); }
+  if (today() !== lastDay) { lastDay = today(); state.keep = {}; render(); }
   state.store.refresh();
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wake(); });
 window.addEventListener('online', wake);
 setInterval(() => { if (document.visibilityState === 'visible') wake(); }, 60000);
 
-// İlk sürümde görevlerin bitti bilgisi yoktu: kayıt girilmiş geçmiş plan günlerini bir kez "bitti" say.
-let migrating = false;
-function migrateTasks() {
-  const st = state.store;
-  if (migrating || !st || (st.mode === 'supabase' && (!st.user || !st.lastSync))) return;
-  const snap = st.snapshot();
-  const topics = snap.topics || {};
-  if (Object.keys(topics).some((c) => c.startsWith('task:'))) return;
-  const days = new Set((snap.sessions || []).map((r) => r.day));
-  const t = today();
-  const hits = TASKS.filter((x) => x.date <= t && days.has(x.date));
-  if (!hits.length) return;
-  migrating = true;
-  try { hits.forEach((x) => st.setTopic(x.id, 'done')); } finally { migrating = false; }
-}
-
 // ---------------------------------------------------------------- başlat
 (async function start() {
   $app.innerHTML = '<div class="splash">Yükleniyor…</div>';
   const demo = params.has('demo');
   let demoToday = state.fakeToday || iso(new Date());
-  if (diffDays(demoToday, PLAN.start) < 7) demoToday = '2026-11-26';
+  if (diffDays(demoToday, PLAN.start) < 7) demoToday = addDays(PLAN.start, 45);
   try {
     state.store = await createStore({ demo, demoToday });
   } catch (e) {
@@ -857,9 +674,8 @@ function migrateTasks() {
     return;
   }
   if (state.store.mode === 'demo' && !state.fakeToday) state.fakeToday = demoToday;
-  state.store.onChange(() => { migrateTasks(); render(); if (state.sheet === 'account') renderSheet(); });
-  migrateTasks();
+  state.store.onChange(() => { render(); if (state.sheet === 'account') renderSheet(); });
   render();
-  state.store.refresh().then(() => { migrateTasks(); render(); });
+  state.store.refresh();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
